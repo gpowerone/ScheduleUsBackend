@@ -2,5 +2,16 @@
   "name": "Schedule_Us_Backend",
   "version": "1.0.0",
   "description": "Schedule Us Backend Service and Database",
-  "license": "None"
+  "license": "None",
+  "dependencies": {
+    "bcrypt": "^3.0.6",
+    "body-parser": "^1.19.0",
+    "config": "^3.2.0",
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "massive": "^5.11.1",
+    "moment-timezone": "^0.5.26",
+    "uuid": "^3.3.2",
+    "uuid-validate": "0.0.3"
+  }
 }
