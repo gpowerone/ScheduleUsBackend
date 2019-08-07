@@ -11,6 +11,9 @@
     "express": "^4.17.1",
     "massive": "^5.11.1",
     "moment-timezone": "^0.5.26",
+    "request": "^2.88.0",
+    "request-promise": "^4.2.4",
+    "twilio": "^3.33.1",
     "uuid": "^3.3.2",
     "uuid-validate": "0.0.3"
   }
