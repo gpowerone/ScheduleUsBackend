@@ -13,11 +13,14 @@ const clientcls = require('./libraries/client')
 const sessioncls = require('./libraries/session')
 const messagecls = require('./libraries/message')
 const twilio = require('twilio');
+const awssdk = require('aws-sdk')
 
 const dbConfig = config.get('ScheduleUs.dbConfig');
 const twConfig = config.get('ScheduleUs.twilio');
 const rcConfig = config.get('ScheduleUs.recaptcha');
 const evConfig = config.get('ScheduleUs.evConfig');
+
+awssdk.config.update({region: 'us-east-1'})
 
 massive({  
   host: dbConfig.host,
@@ -28,6 +31,7 @@ massive({
 }).then(db => {
 
   var objs={
+    aws: awssdk,
     utilityobj: new utilitycls(),
     sessionobj: new sessioncls(db),
     clientobj: new clientcls(db, rcConfig),
@@ -143,7 +147,7 @@ massive({
         objs.clientobj.verifyCaptcha(req.body.recaptchaToken).then(re => {
            if (re==="OK") {
 
-            var msg = objs.clientobj.verify(req.body.Phone,req.body.Passwd);
+            var msg = objs.clientobj.verify(req.body.FirstName,req.body.LastName,req.body.Phone,req.body.Passwd);
             if (msg==="OK")
             {
                 var sPhone=objs.clientobj.standardizePhone(req.body.Phone);
@@ -156,7 +160,7 @@ massive({
                               objs.bcrypt.hash(req.body.Passwd, psalt, function(err, _hash) {
                                   objs.bcrypt.genSalt(10, function(err, salt) {
                                       objs.bcrypt.hash(req.body.SecAnswer, salt, function(err, _sechash) {
-                                          objs.clientobj.create(sPhone, req.body.SecQuestion, _hash, _sechash).then(r=> 
+                                          objs.clientobj.create(req.body.FirstName, req.body.LastName, sPhone, req.body.SecQuestion, _hash, _sechash).then(r=> 
                                           {      
                                                 if (r===null) {
                                                   res.send({ status: 500, message:"An unspecified error occurred"});
@@ -355,6 +359,22 @@ massive({
               res.send({ status: 500, message:s });
             }
         })
+    }
+    catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/setemail', function(req, res) {
+    try {
+      objs.clientobj.setEmail(req.body.EmailAddress).then(s=> {
+          if (s==="OK") {
+            res.send({ status: 200, message:"OK" });
+          }        
+          else {
+            res.send({ status: 500, message:s });
+          }
+      })
     }
     catch(e) {
         res.send({ status: 500, message:"An unexpected error occurred"});

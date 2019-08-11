@@ -98,14 +98,17 @@ class client {
         });
     }
 
-    async create(phone,secquestion,hash,sechash) {        
+    async create(firstname,lastname,phone,secquestion,hash,sechash) {        
 
         return await this.db.Clients.insert({
             ClientID: this.objs.uuidv1(),
             FailedAttempts: 0,
             Password: hash,
+            HasImage: false,
             Enabled: true,
             PhoneNumber: phone,
+            FirstName: firstname,
+            LastName: lastname,
             IsPremium: false,
             SecQuestion: secquestion,
             SecAnswer: sechash,
@@ -127,6 +130,8 @@ class client {
             this.db.Clients.destroy({
                 ClientID: c
             })
+
+            return "OK";
         })
     }
 
@@ -286,6 +291,7 @@ class client {
                                 if (clientid===null) {
                                     return self.objs.sessionobj.deleteForClient(r.ClientID).then(dc=> {
                                         return self.objs.sessionobj.create(r.ClientID).then(s=> {
+                                            s.UserName=r.FirstName+" "+r.LastName;
                                             return s;
                                         });
                                     });
@@ -349,6 +355,28 @@ class client {
         });
     }
 
+    async setEmail(emailaddress) {
+        return await this.objs.sessionobj.verify().then(c=> {
+
+            if (c!==null) {
+                return this.db.ClientEmailVerification.insert({
+                    ClientEmailVerificationID: this.objs.uuidv1(),
+                    ClientID: c,
+                    EmailAddress: emailaddress,
+                    Verification: this.objs.utilityobj.createHash(64)
+                }).then(r=> {
+                    this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click <a href='https://beta.schd.us/verifyemail.html?v="+r.Verification+"'>this link</a> to verify your email address");
+
+                    return "OK";
+                });
+            }
+            else {
+                return "An unexpected problem occurred";
+            }
+               
+        })
+    }
+
     standardizePhone(phone) {
         phone= phone.replace(/[^0-9]/g,"");
         if (phone.length===10) {
@@ -360,7 +388,24 @@ class client {
         return "NotOK";
     }
 
-    verify(phone,passwd) {
+    verify(firstname,lastname,phone,passwd) {
+
+        if (firstname.length<1) {
+            return "First name is required";
+        }
+
+        if (lastname.length<1) {
+            return "Last name is required";
+        }
+
+        if (firstname.length>64) {
+            return "First name is too long";
+        }
+
+        if (lastname.length>64) {
+            return "Last name is too long";
+        }
+
         var phoneVerification = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/im;
         if (!phoneVerification.test(phone)) {
             return "Enter phone number with area code in format NNN-NNN-NNNN"
