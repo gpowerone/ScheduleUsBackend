@@ -73,6 +73,37 @@ class utilities {
         };
     }
 
+    standardizePhone(phone) {
+        try {
+            phone= phone.replace(/[^0-9]/g,"");
+            if (phone.length===10) {
+                phone="1"+phone;
+            }
+            if (phone.length===11) {
+                return phone;
+            }
+        }
+        catch(e) {}
+
+        return "NotOK";
+    }
+
+    verifyEmail(emailaddress) {
+        var emailVerification = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+        if (!emailVerification.test(emailaddress)) {
+            return "Email address is invalid";
+        }
+        return "OK";
+    }
+
+    verifyPhone(phone) {
+        var phoneVerification = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/im;
+        if (!phoneVerification.test(phone)) {
+            return "Enter phone number with area code in format NNN-NNN-NNNN";
+        }
+        return "OK";
+    }
+
     _setObjs(_objs) {
         this.objs=_objs;
     }

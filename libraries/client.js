@@ -1,9 +1,29 @@
 class client {
 
     async accountRecovery(phoneNumber) {
-        return await this.getClientByPhone(phoneNumber).then(r => {
+
+        var sPhone = this.objs.utilityobj.standardizePhone(phoneNumber);
+        if (sPhone==="NotOK") {
+            return "Please check that the phone number is formatted correctly";
+        }
+
+        return await this.getClientByPhone(sPhone).then(r => {
             if (r!==null) {
-                return r.secquestion;
+
+                var hsh=this.objs.utilityobj.createHash(42);
+
+                return this.db.Clients.update({
+                    ClientID: r.ClientID
+                }, {
+                    Recover: hsh
+                }).then(cr=> {
+
+                    // Reset URL
+                    this.objs.messageobj.sendMessage(sPhone, "Click here to recover your Schedule Us account: https://"+this.objs.envURL+"/recover.html?v="+hsh);
+
+                    return "OK";
+                })
+ 
             }
             return null;
         })
@@ -35,7 +55,7 @@ class client {
 
             return this.login(null,passwd,null,c).then(lr=> {
                 if (lr==="OK") {
-                    var sPhone=this.objs.clientobj.standardizePhone(phone);
+                    var sPhone=this.objs.utilityobj.standardizePhone(phone);
                     if (sPhone!=="NotOK") {
                         return this.objs.clientobj.getClientByPhone(sPhone).then(rvp=> {
                             if (rvp===null) {
@@ -96,6 +116,18 @@ class client {
                 }
             })
         });
+    }
+
+    contact(params) {
+        var msg="Name: "+
+        this.objs.xss(params.YourName)+"<br />Email: "+
+        this.objs.xss(params.ContactEmail)+"<br />Phone: "+
+        this.objs.xss(params.ContactPhone)+"<br />Reason: "+
+        this.objs.xss(params.ContactReason)+"<br />Details:<br />"+
+        this.objs.xss(params.ContactDetails);
+
+        this.objs.messageobj.sendEmail("gpowerone@yahoo.com","Schdule Us Contact", msg);
+        return "OK";
     }
 
     async create(firstname,lastname,phone,secquestion,hash,sechash) {        
@@ -164,15 +196,7 @@ class client {
                         return "Postal code is required";
                     }
 
-                    var sok = false;
-                    var states = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
-                    for(var x=0; x<states.length; x++) {
-                        if (State===states[x]) {
-                            sok=true;
-                        }
-                    }
-
-                    if (!sok) {
+                    if (!this.objs.utilityobj.getUSStates().hasOwnProperty(State)) {
                         return "State is invalid";
                     }
 
@@ -365,7 +389,7 @@ class client {
                     EmailAddress: emailaddress,
                     Verification: this.objs.utilityobj.createHash(64)
                 }).then(r=> {
-                    this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click <a href='https://beta.schd.us/verifyemail.html?v="+r.Verification+"'>this link</a> to verify your email address");
+                    this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click <a href='https://"+this.objs.envURL+"/verifyemail.html?v="+r.Verification+"'>this link</a> to verify your email address");
 
                     return "OK";
                 });
@@ -377,16 +401,6 @@ class client {
         })
     }
 
-    standardizePhone(phone) {
-        phone= phone.replace(/[^0-9]/g,"");
-        if (phone.length===10) {
-            phone="1"+phone;
-        }
-        if (phone.length===11) {
-            return phone;
-        }
-        return "NotOK";
-    }
 
     verify(firstname,lastname,phone,passwd) {
 
@@ -406,9 +420,9 @@ class client {
             return "Last name is too long";
         }
 
-        var phoneVerification = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/im;
-        if (!phoneVerification.test(phone)) {
-            return "Enter phone number with area code in format NNN-NNN-NNNN"
+        var vp = this.objs.utilityobj.verifyPhone(phone);
+        if (vp!=="OK") {
+            return vp;
         }
 
         if (passwd.length<8 || !/[a-z]/.test(passwd) || !/[0-9]/.test(passwd) || !/[A-Z]/.test(passwd)) {
