@@ -29,9 +29,11 @@ class message {
 
         return await sendPromise.then(
             function(data) {
+                console.log(data);
                     return "OK";
             }).catch(
                 function(err) {
+                    console.log(err);
                     return err;
             });
 

@@ -1,0 +1,21 @@
+{
+   "ScheduleUs": {
+        "dbConfig": {
+            "host": "127.0.0.1",
+            "port": 5432,
+            "user": "postgres",
+            "database": "ScheduleUs",
+            "password": "Candilaria1"
+        },
+        "evConfig": {
+            "envURL": "beta.schd.us/app"
+        },
+        "twilio": {
+            "sid": "AC7223dc45444723c4435a5a958ae0f708",
+            "token": "15b9848e22b1fc25c3b0e7a719d72a45"
+        },
+        "recaptcha": {
+            "secret": "6Lc1xa4UAAAAAN-A_Vg3QL6pBLNTxjpj-hlLV_f-"
+        }
+    }
+}

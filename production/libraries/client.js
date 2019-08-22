@@ -19,7 +19,7 @@ class client {
                 }).then(cr=> {
 
                     // Reset URL
-                    this.objs.messageobj.sendMessage(sPhone, "Click here to recover your Schedule Us account: https://"+this.objs.envURL+"/#/recover?c="+r.ClientID+"&v="+hsh);
+                    this.objs.messageobj.sendMessage(sPhone, "Click here to recover your Schedule Us account: https://"+this.objs.envURL+"/#/recover?v="+hsh);
 
                     return "OK";
                 })
@@ -29,54 +29,18 @@ class client {
         })
     }
 
-    async accountRecSec(clientid, verificationid) {
-        return await this.getClientByID(clientid).then(cli=> {
-            if (cli!==null) {
-                if (cli.Recover===verificationid) {
-                    return cli.SecQuestion;
-                }
-                else {
-                    return null;
-                }
-            }
-            else {
-                return null;
-            }
-        })
-    }
+    async accountSecurityQuestion(clientid, answer) {
+        return await this.getClientByID(clientid).then(r=> {
+            if (r!==null) {
+                var selfobj = this.objs;
 
-    async accountSecurityQuestion(clientid, verificationcode, passwd, secanswer, phash) {
-        return await this.getClientByID(clientid).then(cli=> {
-            if (cli!==null) {
-                if (cli.Recover===verificationcode) {
-
-                    var self = this;
-                    return this.objs.bcrypt.compare(secanswer,cli.SecAnswer).then(function(res) {
-
-                        if (res) {
-
-                            if (passwd.length<8 || !/[a-z]/.test(passwd) || !/[0-9]/.test(passwd) || !/[A-Z]/.test(passwd)) {
-                                return "Password must be at least 8 characters and contain an uppercase character, a lowercase character, and a number";
-                            }
-
-                            return self.db.Clients.update({
-                                ClientID: cli.ClientID
-                            }, {
-                                Recover: null,
-                                Password: phash
-                            }).then(r=> {
-                                return "OK";
-                            })
-                        }
-                        else {
-                            return "Invalid Credentials"
+                selfobj.bcrypt.genSalt(7, function(err, salt) {
+                    selfobj.bcrypt.hash(answer, salt, function(err, _hash) {
+                        if (r.secanswer===_hash) {
+                            return true;
                         }
                     })
-
-                }
-                else {
-                    return "Invalid Credentials"
-                } 
+                })
             }
             return false;
         })
@@ -315,29 +279,19 @@ class client {
 
     async login(phone,passwd,email,clientid) {
 
-        var conditional=[];
-        if (clientid!=null) {
-            conditional.push({
-                "ClientID": clientid
-            })
-        }
-        else if (phone!==null) {
-            conditional.push({
-                "PhoneNumber": phone
-            })
-        }
-        else if (email!==null) {
-            conditional.push({
-                "EmailAddress": email
-            })
-        }
-        else {
-            return new Promise();
-        }
-
         return await this.db.Clients.findOne({
-            or: conditional
-        }).then(r=> {  
+            or: [
+                {
+                    "PhoneNumber": phone                 
+                },
+                {
+                    "EmailAddress": email                   
+                },
+                {
+                    "ClientID": clientid
+                }
+            ]
+        }).then(r=> {
             if (r!==null) {
                 if (r.FailedAttempts<6) {
                     var self=this;
@@ -393,7 +347,6 @@ class client {
                 }
             }
             else {
-                console.log("hi");
                 return "Invalid Credentials";
             }
         })    
@@ -436,7 +389,7 @@ class client {
                     EmailAddress: emailaddress,
                     Verification: this.objs.utilityobj.createHash(64)
                 }).then(r=> {
-                    this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click https://"+this.objs.envURL+"/#/verifyemail?c="+c+"&v="+r.Verification+" to verify your email address");
+                    this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click <a href='https://"+this.objs.envURL+"/#/verifyemail?v="+r.Verification+"'>this link</a> to verify your email address");
 
                     return "OK";
                 });
@@ -492,38 +445,6 @@ class client {
 
                     return "OK";
                 }               
-            }
-           
-            return "An error occurred";            
-        })
-    }
-
-    async verifyEmail(clientid,verificationid) {
-        var self = this;
-        return await this.getClientByID(clientid).then(cli=> {
-            if (cli!==null) {
-                return this.db.ClientEmailVerification.findOne({
-                    Verification: verificationid,
-                    ClientID: clientid
-                }).then(r=> {
-                    if (r!==null) {
-                        return self.db.Clients.update({
-                            ClientID: r.ClientID
-                        }, {
-                            EmailAddress: r.EmailAddress
-                        }).then(q=> {
-
-                            return self.db.ClientEmailVerification.destroy({
-                                ClientEmailVerificationID: r.ClientEmailVerificationID
-                            }).then(d=> {
-                                return "OK";
-                            });
-                        });
-                    }
-                    else {
-                        return "An error occurred"
-                    }
-                })                               
             }
            
             return "An error occurred";            
