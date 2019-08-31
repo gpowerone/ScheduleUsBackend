@@ -349,7 +349,7 @@ massive({
          if (r!==null) {
             objs.eventsobj.getEventsForClient().then(r=> {
                 if (r!==null) {
-                    res.send({ status: 200, message:JSON.stringify(r)}); 
+                    res.send({ status: 200, message:xss(JSON.stringify(r))}); 
                 }
                 else {
                     res.send({ status: 500, message:"An unexpected error occurred"}); 
@@ -365,6 +365,22 @@ massive({
       res.send({ status: 500, message:"An unexpected error occurred"});
     }
     
+  })
+
+  app.post('/geteventbyhash', function(req, res) {
+      try {
+         objs.eventsobj.getEventByHash(req.body.hsh,req.body.me,req.body.mic).then(r=> {
+            if (r!==null) {
+                res.send({ status: 200, message:xss(JSON.stringify(r))}); 
+            }
+            else {
+                res.send({ status: 500, message:"An unexpected error occurred"}); 
+            }
+         });
+      }
+      catch(e) {
+         res.send({ status: 500, message:"An unexpected error occurred"});
+      }
   })
 
   app.post('/login', function(req, res) {
@@ -406,8 +422,13 @@ massive({
 
   app.post('/pickforus', function(req,res) {
       try {
-          objs.pickobj.doPickForUs(req.body);
-          res.send({ status: 200, message:"OK"});
+          var r = objs.pickobj.doPickForUs(req.body);
+          if (r===null) {
+             res.send({ status: 200, message:"N"});
+          }
+          else {
+             res.send({ status: 200, message:JSON.stringify(r)});
+          }
       }
       catch(e) {
          console.log(e);

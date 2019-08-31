@@ -7,7 +7,19 @@ class utilities {
            hash += characters.charAt(Math.floor(Math.random() * characters.length));
         }
         return hash
-     }
+    }
+
+    createTree(items,parentid) {
+        var tree=[]; 
+        for(var x=0; x<items.length; x++) {
+            if (items[x].ParentID===parentid) {
+                var t = {item: items[x], children: this.createTree(items,items[x].EventCommentID)};
+                tree.push(t);
+            }
+        }
+
+        return tree;
+    }
 
     getUSStates() {
         return {

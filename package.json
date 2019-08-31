@@ -14,6 +14,7 @@
     "moment-timezone": "^0.5.26",
     "request": "^2.88.0",
     "request-promise": "^4.2.4",
+    "shorturl": "0.0.3",
     "twilio": "^3.33.1",
     "uuid": "^3.3.2",
     "uuid-validate": "0.0.3",

@@ -12,6 +12,7 @@ const utilitycls = require('./libraries/utility')
 const clientcls = require('./libraries/client')
 const sessioncls = require('./libraries/session')
 const messagecls = require('./libraries/message')
+const pickforuscls = require('./libraries/pickforus')
 const twilio = require('twilio')
 const awssdk = require('aws-sdk')
 const xss = require('xss')
@@ -37,6 +38,7 @@ massive({
     sessionobj: new sessioncls(db),
     clientobj: new clientcls(db, rcConfig),
     eventsobj: new eventscls(db),
+    pickobj: new pickforuscls(db),
     messageobj: new messagecls("+12406410911", new twilio(twConfig.sid, twConfig.token)),
     request: request,
     bcrypt:bcrypt,
@@ -51,6 +53,7 @@ massive({
   objs.clientobj._setObjs(objs);
   objs.eventsobj._setObjs(objs);
   objs.messageobj._setObjs(objs);
+  objs.pickobj._setObjs(objs);
 
   function sessionHook(req,res,next) {
     try {
@@ -84,16 +87,39 @@ massive({
     }
   })
 
-  app.get('/accountquestion', function(req, res) {
+  app.post('/accountrecsec', function(req, res) {
     try {
-      objs.clientobj.accountSecurityQuestion(req.body.secanswer).then(r=> {
+      objs.clientobj.accountRecSec(req.body.ClientID, req.body.VerificationCode).then(r=> {
           if (r!==null) {
-            res.send({ status: 200, message:"OK" });
+            res.send({ status: 200, message:r });
           }        
           else {
-            res.send({ status: 500, message:"An unexpected error occurred" });
+            res.send({ status: 500, message:"Verification not found" });
           }
       });
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+
+  app.post('/accountquestion', function(req, res) {
+    try {
+        objs.bcrypt.genSalt(10, function(err, psalt) {
+          objs.bcrypt.hash(req.body.Passwd, psalt, function(err, _pwhash) {
+
+              objs.clientobj.accountSecurityQuestion(req.body.ClientID,req.body.VerificationCode,req.body.Passwd,req.body.SecAnswer,_pwhash).then(r=> {
+                  if (r==="OK") {
+                    res.send({ status: 200, message:"OK" });
+                  }        
+                  else {
+                    res.send({ status: 500, message:r });
+                  }
+              })
+              
+          })
+        })
     }
     catch(e) {
       res.send({ status: 500, message:"An unexpected error occurred"});
@@ -323,7 +349,7 @@ massive({
          if (r!==null) {
             objs.eventsobj.getEventsForClient().then(r=> {
                 if (r!==null) {
-                    res.send({ status: 200, message:JSON.stringify(r)}); 
+                    res.send({ status: 200, message:xss(JSON.stringify(r))}); 
                 }
                 else {
                     res.send({ status: 500, message:"An unexpected error occurred"}); 
@@ -339,6 +365,22 @@ massive({
       res.send({ status: 500, message:"An unexpected error occurred"});
     }
     
+  })
+
+  app.post('/geteventbyhash', function(req, res) {
+      try {
+         objs.eventsobj.getEventByHash(req.body.hsh,req.body.me,req.body.mic).then(r=> {
+            if (r!==null) {
+                res.send({ status: 200, message:xss(JSON.stringify(r))}); 
+            }
+            else {
+                res.send({ status: 500, message:"An unexpected error occurred"}); 
+            }
+         });
+      }
+      catch(e) {
+         res.send({ status: 500, message:"An unexpected error occurred"});
+      }
   })
 
   app.post('/login', function(req, res) {
@@ -378,20 +420,21 @@ massive({
      }
   })
 
-  app.post('/myevents', function(req, res) {
-     try {
-        var eventsPage = {
-          
-        }
-     }
-     catch(e) {
+  app.post('/pickforus', function(req,res) {
+      try {
+          var r = objs.pickobj.doPickForUs(req.body);
+          if (r===null) {
+             res.send({ status: 200, message:"N"});
+          }
+          else {
+             res.send({ status: 200, message:JSON.stringify(r)});
+          }
+      }
+      catch(e) {
+         console.log(e);
          res.send({ status: 500, message:"An unexpected error occurred"});
-     }
-  })
-  
-  app.post('/pullevents', function(req, res) {
-
-  })
+      }
+  });
 
   app.post('/resendtext', function(req, res) {
     try {
@@ -443,6 +486,22 @@ massive({
     catch(e) {
       res.send({ status: 500, message:"An unexpected error occurred"});
     }
+  });
+
+  app.post('/verifyemail', function(req, res) {
+      try {
+        objs.clientobj.verifyEmail(req.body.ClientID, req.body.VerificationCode).then(r=> {
+            if (r==="OK") {
+              res.send({ status: 200, message:"OK" });
+            }        
+            else {
+              res.send({ status: 500, message:r });
+            }
+        });
+      }
+      catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+      }
   })
 
   app.listen(80, () => console.log(`Schedule Us has started`))

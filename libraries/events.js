@@ -1,12 +1,38 @@
 class events {
 
-    async addGuest(eventID, guest) {
+    async addComment(eventID, eventGuestID, parentID, name, comment) {
+        if (name.length<1) {
+            return "Name is required";
+        }
 
-        if (guest.gemail!==null && this.objs.utilityobj.verifyEmail(guest.gemail)!=="OK") {
+        if (comment.length<1) {
+            return "Comment is required";
+        }
+
+        return await this.db.EventComments.insert({
+            EventCommentID: this.objs.uuidv1(),
+            EventID: eventID,
+            EventGuestID: eventGuestID,
+            CommenterName: name,
+            Comment: comment,
+            ParentID: parentID,
+            CreationDate: new Date().getTime()
+        }).then(r=> {
+            return "OK";
+        });
+    }
+
+    async addGuest(eventID, guest, isOrg, clientID) {
+
+        if (guest.gemail!==null && guest.gemail!=="Not Specified" && this.objs.utilityobj.verifyEmail(guest.gemail)!=="OK") {
             return new Promise(null);
         }
 
-        if (guest.gphone!==null && this.objs.utilityobj.verifyPhone(guest.gphone)!=="OK") {
+        if (guest.gphone!==null && guest.gphone!=="Not Specified" && this.objs.utilityobj.verifyPhone(guest.gphone)!=="OK") {
+            return new Promise(null);
+        }
+
+        if ((guest.gemail===null && guest.gphone===null) || (guest.gemail==="Not Specified" && guest.gphone==="Not Specified")) {
             return new Promise(null);
         }
 
@@ -19,7 +45,8 @@ class events {
             PhoneNumber: phone,
             GuestName: guest.gname,
             IsRequired: guest.greq,
-            IsOrganizer: false
+            IsOrganizer: isOrg,
+            ClientID: clientID
         }).then(r=> {
             return r;
         })
@@ -48,6 +75,12 @@ class events {
         })
     }
 
+    createEvHash() {
+        var d = new Date();
+        var h = this.objs.utilityobj.createHash(8);
+        return d.getDate()+h[0]+d.getMonth()+h[1]+d.getHours()+h[2]+h[4]+d.getMinutes()+h[5]+h[6]+h[7];
+    }
+
     async createEvent(req) {
 
        return await this.objs.sessionobj.verify().then(c=> {
@@ -68,15 +101,17 @@ class events {
                     }
                     creatorID=cli.ClientID;
                 }
-                
-                var validationStatus = this.validateEvent(req,cli,phone);
+
+                var sdate = new Date(req.body.EventDate).getTime()+req.body.UTCOffset;
+                var validationStatus = this.validateEvent(req,cli,sdate);
                 if (validationStatus==="OK") {
                     return this.db.Events.insert({
                         CreatorID: creatorID,
                         CreatorPhone: phone,
+                        CreatorName: req.body.ClientName,
                         EventID: this.objs.uuidv1(),
                         EventName: req.body.EventName,
-                        Hash: this.objs.utilityobj.createHash(32),
+                        Hash: this.createEvHash(),
                         IsRecurring: req.body.EventIsRecurring,
                         EventDescription: req.body.EventDescription,
                         CreationDate: Date.now(),
@@ -87,7 +122,6 @@ class events {
                         GuestsMustRegister:req.body.GuestsMustRegister,
                         GuestsCanBringOthers:req.body.GuestsBringOthers,
                         EventMaxCapacity:req.body.GuestLimitTotal,
-                        LimitPlusOnes:req.body.GuestLimitPerPerson,
                         AllowChildren: req.body.GuestsBringChildren,
                         ProvideSharing: req.body.GuestsProvideSharing,
                         NotifyWhenGuestsAccept:req.body.NotifyGuestAccept,
@@ -96,18 +130,18 @@ class events {
                         NotifyLocationChanged:req.body.NotifyEventLocationChanges,
                         GuestsCanChat:req.body.GuestsCanDiscuss,
                         NotifySchedulingComplete:req.body.NotifyScheduleComplete,
-                        AllowPets:req.body.GuestsBringPets,
                         ReminderTime: req.body.ReminderTime,
                         SeeRSVPed: req.body.GuestsSeeRSVPs,
-                        ScheduleCutoffTime:req.body.ScheduleCutOffTime,
+                        ScheduleCutoffTime:req.body.ScheduleCutoffTime,
                         TimezoneOffset:req.body.UTCOffset,
                         MustApproveDiffLocation: req.body.MustApproveDiffLocation,
-                        MustApproveDiffTime: req.body.MustApproveDiffTime 
+                        MustApproveDiffTime: req.body.MustApproveDiffTime,
+                        EventDate: sdate
                     }).then(r=> {
                         if (r!==null && typeof(r.EventID)!==undefined) {
                     
                             if (actionReq===1) {
-                                return this.scheduleEvent(r.EventID,req.body,phone).then(e=> {
+                                return this.scheduleEvent(r.EventID, req.body, phone, sdate, creatorID).then(e=> {
                                     return "OK";
                                 }); 
                             }
@@ -121,7 +155,7 @@ class events {
                                         gemail: null,
                                         gphone: phone,
                                         greq: true
-                                    })
+                                    }, true)
                                 }
                                 this.verifyPhone(e.EventID,e.Hash,phone);
                                 return "OK"; 
@@ -139,6 +173,81 @@ class events {
        });       
     }
 
+    async getEventByHash(hsh, me, imic) {
+        return await this.db.Events.findOne({ 
+            Hash: hsh
+        }).then(r=> {
+            if (r!==null) {
+                if (r.EventDate<new Date().getTime()+(1000*60*60*24)) {
+                    return null;
+                }
+
+                return this.db.EventGuests.find({
+                    EventID: r.EventID
+                }).then(eg=> {
+                   
+                    return this.db.EventSchedules.find({
+                        EventID: r.EventID,
+                        Status: 0
+                    }).then(es=> {
+                        r.Schedules=[];
+                        for(var s=0; s<es.length; s++) {
+                            r.Schedules.push(es[s]);
+                        }
+                   
+                        return this.db.EventScheduleGuests.find({
+                            EventScheduleID: es.EventScheduleID
+                        }).then(esg=> {
+
+                            r.Guests=[];
+                            for(var g=0; g<eg.length; g++) {
+
+                                var accpt=null;
+                                
+                                for(var ga=0; ga<esg.length; ga++) {
+
+                                    if (esg[ga].EventGuestID==eg[g].EventGuestID) {
+                                        accpt=esg[ga].Acceptance;
+                                    }
+
+                                    if (!imic) {
+                                        if (esg[ga].EventGuestID===me) {
+                                            r.NeedsAcceptance=accpt;
+                                        }
+                                    }                                
+                                }
+
+                                if (imic) {
+                                    if (eg[g].ClientID===me) {
+                                        r.NeedsAcceptance=accpt;
+                                    }
+                                }            
+
+                                r.Guests.push({
+                                    GuestName: eg[g].GuestName,
+                                    Acceptance: accpt
+                                });
+                            }
+
+                            return this.db.EventComments.find({
+                                EventID: r.EventID
+                            }).then(ec=> {
+                                r.Comments=[];
+                                if (ec!=null && ec.length>0) {
+                                    r.Comments = this.objs.utilityobj.createTree(ec,"00000000-0000-0000-0000-000000000000");
+                                }
+                                return r;
+                            }) 
+                        });
+                    }) 
+                })              
+            }
+            else {
+                return null;
+            }
+        });
+    }
+
     async getEventById(id) {
         return await this.db.Events.findOne({ 
             EventID: id
@@ -151,6 +260,7 @@ class events {
                     for(var g=0; g<eg.length; g++) {
                         r.Guests.push(eg[g]);
                     }
+
                     return r;
                 })              
             }
@@ -182,9 +292,24 @@ class events {
                         }
 
                         return this.db.Events.find({or: vor}).then(participating=> {
+
+                            var host= [];
+                            var part =[];
+                            for(var n=0; n<hosting.length; n++) {
+                                if (hosting[n].EventDate>new Date().getTime()+(1000*60*60*24)) {
+                                    host.push(hosting[n]);
+                                }
+                            }
+                            for(var n=0; n<participating.length; n++) {
+                                if (participating[n].EventDate>new Date().getTime()+(1000*60*60*24)) {
+                                    part.push(participating[n]);
+                                }
+                            }
+
+
                             return {
-                                h: hosting,
-                                p: participating
+                                h: host,
+                                p: part
                             }
                         });                      
                     })
@@ -193,15 +318,16 @@ class events {
         });
     }
 
-    async scheduleEvent(eventid,params,phone) {
+    async scheduleEvent(eventid,params,phone,sdate,clientid) {
         return await this.db.EventSchedules.insert({
             EventScheduleID: this.objs.uuidv1(),
             EventID: eventid,
             IterationNum:0,
-            StartDate: params.EventDate,
+            StartDate: sdate,
             TimeScheduled:null,
             EventLength: params.EventLength,
             Status: 0,
+            Location: params.Location,
             Address: params.EventStreet,
             City: params.EventCity,
             State: params.EventState,
@@ -210,11 +336,11 @@ class events {
 
             for(var x=0; x<params.Guests.length; x++) {
 
-                this.addGuest(eventid, params.Guests[x]).then(g=> {
+                this.addGuest(eventid, params.Guests[x], false, null).then(g=> {
 
                     this.db.EventScheduleGuests.insert({
                         EventGuestID: g.EventGuestID,
-                        Acceptance: false,
+                        Acceptance: null,
                         EventScheduleGuestID: this.objs.uuidv1(),
                         EventScheduleID: e.EventScheduleID
                     })
@@ -226,12 +352,12 @@ class events {
                     gname: params.YourName,
                     gemail: null,
                     gphone: phone,
-                    greq: true
-                }).then(g=> {
-                    if (g!==null) {
+                    greq: true,                    
+                }, true, clientid).then(gr=> {
+                    if (gr!==null) {
                         this.db.EventScheduleGuests.insert({
-                            EventGuestID: g.EventGuestID,
-                            Acceptance: false,
+                            EventGuestID: gr.EventGuestID,
+                            Acceptance: true,
                             EventScheduleGuestID: this.objs.uuidv1(),
                             EventScheduleID: e.EventScheduleID
                         })
@@ -243,7 +369,7 @@ class events {
         })
     }
 
-    validateEvent(req,cli) {
+    validateEvent(req,cli,sdate) {
 
         try {
             if (req.body.ClientName.length<1 || req.body.ClientName.length>128) {
@@ -252,6 +378,10 @@ class events {
 
             if (req.body.EventName.length<1 || req.body.EventName.length>128) {
                 return "Event name is invalid";
+            }
+
+            if (req.body.Location.length<1 || req.body.Location.length>128) {
+                return "Location is invalid";
             }
 
             if (req.body.EventStreet.length<1 || req.body.EventStreet.length>255) {
@@ -270,16 +400,41 @@ class events {
                 return "Postal code is invalid";
             }
 
-            if (!Number.isInteger(req.body.GuestLimitPerPerson)) {
-                return "Guest limit per person is invalid";
-            }
-
             if (!Number.isInteger(req.body.GuestLimitTotal)) {
                 return "Total guest limit is invalid";
             } 
 
+            var vdate = new Date().getTime()+req.body.UTCOffset;
+            var diff = sdate-vdate;
+            var hours = Math.round(diff/(1000*60*60))
+            var length = parseInt(req.body.EventLength)/60;
+            if (hours<length) {
+                return "Cannot schedule dates in the past";
+            }
+
+            if (parseInt(req.body.ReminderTime)>hours) {
+                return "Cannot set a reminder time past the date of the event";
+            }
+
+            if (parseInt(req.body.ScheduleCutoffTime)>hours) {
+                return "Cannot set a cutoff time past the date of the event";
+            }
+
             if (req.body.Guests.length===0) {
                 return "At least one guest is required";
+            }
+
+            /* Verify that users don't pick unsupported options for their configuration */
+            if (req.body.GuestListVisible===false) {
+
+                req.body.GuestsCanChat=false;
+                req.body.GuestsSeeRSVPs=false;               
+            }
+
+            if (req.body.GuestsCanBringOthers===false) {
+                req.body.GuestsMustRegister=false;
+                req.body.ProvideSharing=false;
+                req.body.AllowChildren=false;              
             }
 
             for(var g=0; g<req.body.Guests.length; g++) {
@@ -287,13 +442,17 @@ class events {
                 if (guest.gname.length<1 || guest.gname.length>128) {
                     return "Invalid guest name";
                 }
-                var vp = this.objs.utilityobj.verifyPhone(guest.gphone);
-                if (vp!=="OK") {
-                    return vp;
+                if (guest.gphone!=="Not Specified" && guest.gphone!==null) {
+                    var vp = this.objs.utilityobj.verifyPhone(guest.gphone);
+                    if (vp!=="OK") {
+                        return vp;
+                    }
                 }
-                var ve = this.objs.utilityobj.verifyEmail(guest.gemail);
-                if (ve!=="OK") {
-                    return ve;
+                if (guest.gemail!=="Not Specified" && guest.gemail!==null) {
+                    var ve = this.objs.utilityobj.verifyEmail(guest.gemail);
+                    if (ve!=="OK") {
+                        return ve;
+                    }
                 }
             }
 
