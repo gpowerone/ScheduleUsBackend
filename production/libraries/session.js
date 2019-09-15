@@ -3,7 +3,7 @@ class Session {
     async create(clientID) {
         return await this.db.Sessions.insert({
             ClientID: clientID,
-            SessionID: this.objs.uuidv1(),
+            SessionID: this.objs.uuidv4(),
             SessionLong: this.objs.utilityobj.createHash(128),
             ValidStartDate: Date.now()
         }).then(r=> {

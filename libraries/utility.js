@@ -85,6 +85,17 @@ class utilities {
         };
     }
 
+    shuffle(array) {
+        var t, current, top = array.length;
+        if(top) while(--top) {
+          current = Math.floor(Math.random() * (top + 1));
+          t = array[current];
+          array[current] = array[top];
+          array[top] = t;
+        }
+        return array;
+    }
+
     standardizePhone(phone) {
         try {
             phone= phone.replace(/[^0-9]/g,"");

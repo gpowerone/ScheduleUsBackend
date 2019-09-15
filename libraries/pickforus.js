@@ -42,8 +42,6 @@ class pickforus {
         // If the event is after today then we need to add the rest of today
         var uTime=this.userTime.getTime();
 
-        console.log(chosenDate);
-
         // If there are days, these are always added. 
         if (chosenDate.d>0) { 
             var tomorrow = new Date();
@@ -58,7 +56,6 @@ class pickforus {
 
         
         var schdate = new Date(uTime);
-        console.log(schdate);
 
         var r={
             date:(schdate.getUTCMonth()+1)+"-"+schdate.getUTCDate()+"-"+schdate.getUTCFullYear(),
@@ -236,6 +233,8 @@ class pickforus {
     }
 
     findFinalDate(usePreferred) {
+        var choices=[];
+        var betterchoices=[]
         var possibleTimes=this.days;
         if (usePreferred) {
             possibleTimes=this.preferredtimes;
@@ -245,20 +244,62 @@ class pickforus {
         for(var day=0; day<possibleTimes.length; day++) {
             for(var time=0; time<possibleTimes[day].t.length; time++) {
                 if (possibleTimes[day].t[time][1]===0) {
-                    return {d:possibleTimes[day].d, t:possibleTimes[day].t[time]}
+                    choices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
+                    if (possibleTimes[day].t[time][0]>10 && possibleTimes[day].t[time][0]<=19) {
+                        betterchoices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
+                    }
                 }
             }
+        }
+
+        if (betterchoices.length>0) {
+            var n=Math.floor(Math.random()*betterchoices.length-1,0);
+            return betterchoices[n];
         }
 
         for(var day=0; day<possibleTimes.length; day++) {
             for(var time=0; time<possibleTimes[day].t.length; time++) {
                 if (possibleTimes[day].t[time][1]===30) {
-                    return {d:possibleTimes[day].d, t:possibleTimes[day].t[time]}
+                    choices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]});
+                    if (possibleTimes[day].t[time][0]>10 && possibleTimes[day].t[time][0]<=19) {
+                        betterchoices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
+                    }
                 }
             }
         }
 
-        return {d:possibleTimes[0].d, t:possibleTimes[0].t[0]}
+        if (betterchoices.length>0) {
+            var n=Math.floor(Math.random()*betterchoices.length-1,0);
+            return betterchoices[n];
+        }
+        if (choices.length>0) {
+            var n=Math.floor(Math.random()*choices.length-1,0);
+            return choices[n];
+        }
+
+
+        for(var day=0; day<possibleTimes.length; day++) {
+            for(var time=0; time<possibleTimes[day].t.length; time++) {
+                if (possibleTimes[day].t[time][1]===15) {
+                    choices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
+                    if (possibleTimes[day].t[time][0]>10 && possibleTimes[day].t[time][0]<=19) {
+                        betterchoices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
+                    }
+                }
+            }
+        }
+
+        if (betterchoices.length>0) {
+            var n=Math.floor(Math.random()*betterchoices.length-1,0);
+            return betterchoices[n];
+        }
+        if (choices.length>0) {
+            var n=Math.floor(Math.random()*choices.length-1,0);
+            return choices[n];
+        }
+
+        return null;
+
     }
 
     // will look up users and get calendars from sources

@@ -1,7 +1,7 @@
 const express = require('express')
 const bodyParser = require('body-parser')
 const massive = require('massive')
-const uuidv1 = require('uuid/v1')
+const uuidv4 = require('uuid/v4')
 const config = require('config')
 const bcrypt = require('bcrypt')
 const cors = require('cors')
@@ -39,10 +39,10 @@ massive({
     clientobj: new clientcls(db, rcConfig),
     eventsobj: new eventscls(db),
     pickobj: new pickforuscls(db),
-    messageobj: new messagecls("+12406410911", new twilio(twConfig.sid, twConfig.token)),
+    messageobj: new messagecls("+12036354194", new twilio(twConfig.sid, twConfig.token)),
     request: request,
     bcrypt:bcrypt,
-    uuidv1: uuidv1,
+    uuidv4: uuidv4,
     uuidvalidate: uuidvalidate,
     envURL: evConfig.envURL,
     xss: xss
@@ -70,6 +70,13 @@ massive({
 	app.use(bodyParser.json())
   app.use(cors())
   app.use(sessionHook);
+  app.use(function(req, res, next) {
+    res.header('Access-Control-Allow-Origin', '*')
+    res.header('Access-Control-Allow-Credentials', true)
+    res.header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept')
+    next()
+  })
 
   app.post('/accountrecovery', function(req, res) {
     try {
@@ -126,11 +133,79 @@ massive({
     }
   })
 
+  app.post('/addcomment', function(req, res) {
+     try {
+        objs.eventsobj.addComment(req.body.EventID, req.body.EventGuestID, req.body.ParentID, req.body.Comment).then(r=> {
+          if (r==="OK") {
+            res.send({ status: 200, message:"OK" });
+          }        
+          else {
+            res.send({ status: 500, message:r });
+          }
+        })
+     }
+     catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+     }
+  })
+
+  app.post('/addguest', function(req, res) {
+    try {
+       var guestobj={
+          gname: req.body.gname,
+          gphone: req.body.gphone,
+          gemail: req.body.gemail,
+          greq:false
+       };
+       var vg = objs.eventsobj.verifyGuest(guestobj); 
+
+       if (vg==="OK") {
+         objs.sessionobj.verify().then(c=> {
+            objs.eventsobj.getEventById(req.body.EventID).then(e=> {
+                if (e.GuestsCanBringOthers===true && e.ActionReq>0) {
+
+                  for(var eg=0; eg<e.Guests.length; eg++) {
+                    
+                    if ((c!==null && e.Guests[eg].ClientID===c) || 
+                        (guestobj.gphone!==null && guestobj.gphone!=="Not Specified" && e.Guests[eg].PhoneNumber===guestobj.gphone) || 
+                        (guestobj.gemail!==null && guestobj.gemail!=="Not Specified" && e.Guests[eg].EmailAddress===guestobj.gemail)) {
+                       res.send({ status: 500, message:"This person has already been added to the event/activity" });
+                       return;
+                    }
+                  }
+
+                  objs.eventsobj.addGuest(req.body.EventID, guestobj, false, c===null?null:c).then(r=> {
+                      if (r!==null) {
+                        objs.eventsobj.addScheduledGuest(e.Schedules[0].EventScheduleID, r.EventGuestID).then(egs=> {
+                            if (e.NotifyWhenGuestsAccept===true) {
+                                objs.messageobj.sendMessage(e.CreatorPhone,"New attendee "+guestobj.gname+" RSVPed to your event/activity "+e.EventName);
+                            }
+                            res.send({ status: 200, message:"OK" });
+                        })
+                      }        
+                      else {
+                        res.send({ status: 500, message:r });
+                      }
+                    })
+                }
+              });
+          })
+      }
+      else {
+        res.send({ status: 500, message: vg});
+      }
+    }
+    catch(e) {
+     console.log(e);
+     res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+ })
+
   app.post('/changenumber', function(req, res) {
     try {
       objs.clientobj.changeNumber(req.body.Passwd, req.body.PhoneNumber).then(r=> {
           if (r==="OK") {
-            res.send({ status: 200, message:"OK" });
+            res.send({ status: 200, message:r });
           }        
           else {
             res.send({ status: 500, message:r });
@@ -144,7 +219,7 @@ massive({
 
   app.post('/changepassword', function(req, res) {
       try {
-         var msg = objs.clientobj.verify("999-999-9999",req.body.passwd);
+         var msg = objs.clientobj.verify("test","test","999-999-9999",req.body.passwd);
          if (msg==="OK")
          {
             objs.bcrypt.genSalt(10, function(err, psalt) {
@@ -249,7 +324,7 @@ massive({
      try {
      
         objs.eventsobj.createEvent(req).then(r => {
-            if (r==="OK") {
+            if (typeof(r)!=="undefined" && r!==null && (r==="OK" || r.indexOf("?e=")>-1)) {
                res.send({ status: 200, message:"OK" });
             }
             else {
@@ -259,7 +334,6 @@ massive({
       
      }
      catch(e) {
-         console.log(e);
          res.send({ status: 500, message:"An unexpected error occurred"});
      } 
   })
@@ -278,6 +352,22 @@ massive({
     catch(e) {
       res.send({ status: 500, message:"An unexpected error occurred"});
     }
+  })
+
+  app.post('/dorsvp', function(req, res) {
+     try {
+         objs.eventsobj.doRSVP(req.body.EventID, req.body.EventScheduleID, req.body.rsvp, req.body.me).then(r=> {
+            if (r==="OK") {
+              res.send({ status: 200, message:"OK" });
+            }        
+            else {
+              res.send({ status: 500, message:r });
+            }
+         })
+     }
+     catch(e) {
+         res.send({ status: 500, message:"An unexpected error occurred"});
+     }
   })
 
   app.post('/filladdress', function (req, res) {
@@ -468,10 +558,6 @@ massive({
     }
   })
 
-  app.post('/updateevent', function(req, res) {
-
-  })
-
   app.post('/verifyaccount', function(req, res) {
     try {
       objs.clientobj.verifyAccount(req.body.ClientID, req.body.VerificationCode).then(r=> {
@@ -504,5 +590,21 @@ massive({
       }
   })
 
-  app.listen(80, () => console.log(`Schedule Us has started`))
+  app.post('/verifyphone', function(req, res) {
+    try {
+      objs.eventsobj.verifyPhoneConfirm(req.body.EventID, req.body.Hash).then(r=> {
+          if (r!=="Fail") {
+            res.send({ status: 200, message:r });
+          }        
+          else {
+            res.send({ status: 500, message:"Fail" });
+          }
+      });
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+})
+
+  app.listen(process.env.PORT || 80, () => console.log(`Schedule Us has started`))
 });

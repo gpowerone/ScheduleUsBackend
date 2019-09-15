@@ -1,7 +1,7 @@
 const express = require('express')
 const bodyParser = require('body-parser')
 const massive = require('massive')
-const uuidv1 = require('uuid/v1')
+const uuidv4 = require('uuid/v4')
 const config = require('config')
 const bcrypt = require('bcrypt')
 const cors = require('cors')
@@ -42,7 +42,7 @@ massive({
     messageobj: new messagecls("+12406410911", new twilio(twConfig.sid, twConfig.token)),
     request: request,
     bcrypt:bcrypt,
-    uuidv1: uuidv1,
+    uuidv4: uuidv4,
     uuidvalidate: uuidvalidate,
     envURL: evConfig.envURL,
     xss: xss
@@ -70,6 +70,13 @@ massive({
 	app.use(bodyParser.json())
   app.use(cors())
   app.use(sessionHook);
+  app.use(function(req, res, next) {
+    res.header('Access-Control-Allow-Origin', '*')
+    res.header('Access-Control-Allow-Credentials', true)
+    res.header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept')
+    next()
+  })
 
   app.post('/accountrecovery', function(req, res) {
     try {
@@ -124,6 +131,22 @@ massive({
     catch(e) {
       res.send({ status: 500, message:"An unexpected error occurred"});
     }
+  })
+
+  app.post('/addcomment', function(req, res) {
+     try {
+        objs.eventsobj.addComment(req.body.EventID, req.body.EventGuestID, req.body.ParentID, req.body.Comment).then(r=> {
+          if (r==="OK") {
+            res.send({ status: 200, message:"OK" });
+          }        
+          else {
+            res.send({ status: 500, message:r });
+          }
+        })
+     }
+     catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+     }
   })
 
   app.post('/changenumber', function(req, res) {
@@ -278,6 +301,22 @@ massive({
     catch(e) {
       res.send({ status: 500, message:"An unexpected error occurred"});
     }
+  })
+
+  app.post('/dorsvp', function(req, res) {
+     try {
+         objs.eventsobj.doRSVP(req.body.EventID, req.body.EventScheduleID, req.body.rsvp, req.body.me).then(r=> {
+            if (r==="OK") {
+              res.send({ status: 200, message:"OK" });
+            }        
+            else {
+              res.send({ status: 500, message:r });
+            }
+         })
+     }
+     catch(e) {
+         res.send({ status: 500, message:"An unexpected error occurred"});
+     }
   })
 
   app.post('/filladdress', function (req, res) {
@@ -468,10 +507,6 @@ massive({
     }
   })
 
-  app.post('/updateevent', function(req, res) {
-
-  })
-
   app.post('/verifyaccount', function(req, res) {
     try {
       objs.clientobj.verifyAccount(req.body.ClientID, req.body.VerificationCode).then(r=> {
@@ -504,5 +539,5 @@ massive({
       }
   })
 
-  app.listen(80, () => console.log(`Schedule Us has started`))
+  app.listen(process.env.PORT || 80, () => console.log(`Schedule Us has started`))
 });

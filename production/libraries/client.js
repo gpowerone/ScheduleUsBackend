@@ -169,7 +169,7 @@ class client {
     async create(firstname,lastname,phone,secquestion,hash,sechash) {        
 
         return await this.db.Clients.insert({
-            ClientID: this.objs.uuidv1(),
+            ClientID: this.objs.uuidv4(),
             FailedAttempts: 0,
             Password: hash,
             HasImage: false,
@@ -431,7 +431,7 @@ class client {
 
             if (c!==null) {
                 return this.db.ClientEmailVerification.insert({
-                    ClientEmailVerificationID: this.objs.uuidv1(),
+                    ClientEmailVerificationID: this.objs.uuidv4(),
                     ClientID: c,
                     EmailAddress: emailaddress,
                     Verification: this.objs.utilityobj.createHash(64)
