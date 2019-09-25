@@ -9,11 +9,13 @@ class utilities {
         return hash
     }
 
-    createTree(items,parentid) {
+    createTree(items,parentid,il) {
         var tree=[]; 
         for(var x=0; x<items.length; x++) {
             if (items[x].ParentID===parentid) {
-                var t = {item: items[x], children: this.createTree(items,items[x].EventCommentID)};
+                items[x].EventGuestID=null;
+                items[x].IndentLevel="i-"+il;
+                var t = {item: items[x], children: this.createTree(items,items[x].EventCommentID,il+1)};
                 tree.push(t);
             }
         }

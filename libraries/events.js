@@ -1,9 +1,51 @@
 class events {
 
+    async acceptReschedule(eventID,me,imic) {
+        return await this.getEventById(eventID).then({
+            and:[{
+                EventID: eventID
+            },{or:[
+                {ActionReq: 5},{ActionReq: 6}
+            ]}]
+        }).then(e=> {
+            var goForward=false;
+
+            if (imic) {
+                if (e.CreatorID===me) {
+                    goForward=true;
+                }
+            }
+            else {
+                for(var x=0; x<e.Guests.length; x++) {
+                    if (e.Guests[x].EventGuestID===me && e.Guests[x].PhoneNumber===e.CreatorPhone) {
+                        goForward=true;
+                    }
+                }
+            }
+
+            if (goForward) {
+                this.db.Events.update({
+                    EventID: eventID
+                },{
+                    ActionReq:1
+                }).then(isok=>{
+                    return "OK"
+                })
+            }
+            else {
+                return "Insufficient Permissions"
+            }
+        });
+    }
+
     async addComment(eventID, eventGuestID, parentID, comment) {
    
         if (comment.length<1) {
             return "Comment is required";
+        }
+        
+        if (comment.length>1024) {
+            return "Comment must be equal to or shorter than 1024 characters";
         }
 
         return await this.db.Events.findOne({
@@ -20,21 +62,57 @@ class events {
 
             return this.getNameFromEventGuestID(eventGuestID).then(c=> {
 
-                return this.db.EventComments.insert({
-                    EventCommentID: this.objs.uuidv4(),
-                    EventID: eventID,
-                    EventGuestID: eventGuestID,
-                    CommenterName: c,
-                    Comment: comment,
-                    ParentID: parentID,
-                    CreationDate: new Date().getTime()
-                }).then(r=> {
-                    if (e.NotifyOnNewMessages===true) {
-                        this.objs.messageobj.sendMessage(e.CreatorPhone, c+" commented on your event/activity "+e.EventName+ " https://"+this.objs.envURL+"/#/event?e="+hash+"&c="+r.EventCommentID);
-                    }
+                if (c!==null) {
 
-                    return "OK";
-                });
+                    if (parentID!=="00000000-0000-0000-0000-000000000000") {
+
+                        return this.db.EventComments.findOne({
+                            EventCommentID: parentID
+                        }).then(ec=> {
+                            if (ec!==null && ec.ParentID=="00000000-0000-0000-0000-000000000000") {
+                                return this.db.EventComments.insert({
+                                    EventCommentID: this.objs.uuidv4(),
+                                    EventID: eventID,
+                                    EventGuestID: eventGuestID,
+                                    CommenterName: c,
+                                    Comment: comment,
+                                    ParentID: parentID,
+                                    CreationDate: new Date().getTime()
+                                }).then(r=> {
+                                    if (e.NotifyOnNewMessages===true) {
+                                        this.objs.messageobj.sendMessage(e.CreatorPhone, c+" commented on your event/activity "+e.EventName+ " https://"+this.objs.envURL+"/#/event?e="+e.Hash);
+                                    }
+        
+                                    return "OK";
+                                });
+                            }
+                            else {
+                                return "Invalid Parent";
+                            }
+                        })
+                    }
+                    else {
+
+                        return this.db.EventComments.insert({
+                            EventCommentID: this.objs.uuidv4(),
+                            EventID: eventID,
+                            EventGuestID: eventGuestID,
+                            CommenterName: c,
+                            Comment: comment,
+                            ParentID: parentID,
+                            CreationDate: new Date().getTime()
+                        }).then(r=> {
+                            if (e.NotifyOnNewMessages===true) {
+                                this.objs.messageobj.sendMessage(e.CreatorPhone, c+" commented on your event/activity "+e.EventName+ " https://"+this.objs.envURL+"/#/event?e="+e.Hash);
+                            }
+
+                            return "OK";
+                        });
+                    }
+                }
+                else {
+                    return "Invalid commenter";
+                }
             });
         });
     }
@@ -116,6 +194,10 @@ class events {
        return await this.objs.sessionobj.verify().then(c=> {
             return this.objs.clientobj.getClientByID(c).then(cli=> {
 
+                if (cli===null) {
+                    return "Account is required to create events right now"; 
+                }
+
                 var actionReq=0;
 
                 var phone = this.objs.utilityobj.standardizePhone(req.body.ClientPhone);
@@ -163,7 +245,7 @@ class events {
                             ProvideSharing: req.body.GuestsProvideSharing,
                             NotifyWhenGuestsAccept:req.body.NotifyGuestAccept,
                             NotifyOnNewMessages:req.body.NotifyNewMessages,
-                            NotifyEventReschedule:req.body.NotifyEventRescheduled,
+                            NotifyEventRescheduled:req.body.NotifyEventRescheduled,
                             NotifyLocationChanged:req.body.NotifyEventLocationChanges,
                             GuestsCanChat:req.body.GuestsCanDiscuss,
                             NotifySchedulingComplete:req.body.NotifyScheduleComplete,
@@ -203,6 +285,61 @@ class events {
        });       
     }
 
+    async declineReschedule(eventID,me,imic) {
+        return await this.getEventById(eventID).then({
+            and:[{
+                EventID: eventID
+            },{or:[
+                {ActionReq: 5},{ActionReq: 6}
+            ]}]
+        }).then(e=> {
+            var goForward=false;
+
+            if (imic) {
+                if (e.CreatorID===me) {
+                    goForward=true;
+                }
+            }
+            else {
+                for(var x=0; x<e.Guests.length; x++) {
+                    if (e.Guests[x].EventGuestID===me && e.Guests[x].PhoneNumber===e.CreatorPhone) {
+                        goForward=true;
+                    }
+                }
+            }
+
+            if (goForward) {
+
+                return this.db.EventSchedules.update({
+                    EventScheduleID: e.Schedules[0].EventScheduleID
+                },{
+                    Status: 2
+                }).then(p=>{
+                    return this.db.EventSchedules.update({
+                        EventID: e.EventID,
+                        IterationNum: e.Schedules[0].IterationNum-1
+                    },{
+                        Status: 0
+                    }).then(q=>{
+                        this.db.Events.update({
+                            EventID: eventID
+                        },{
+                            ActionReq:1
+                        }).then(isok=>{
+                            return "OK"
+                        })
+                    })
+                })
+
+                
+            }
+            else {
+                return "Insufficient Permissions"
+            }
+        });
+    }
+
+
     async doRSVP(eventid, eventscheduleid, rsvp, me) {
         return await this.db.EventScheduleGuests.find({
             EventScheduleID: eventscheduleid
@@ -237,28 +374,34 @@ class events {
                                 if (e.NotifySchedulingComplete===true && accptCnt===es.length-1) {
                                     if (e.CreatorID!=="00000000-0000-0000-0000-000000000000") 
                                     {  
-                                        this.db.EventGuests.findOne({
+                                        return this.db.EventGuests.findOne({
                                             ClientID: e.CreatorID
                                         }).then(eg=> {
-                                            this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/#/event?e="+e.Hash+"&g="+eg.EventGuestID);
+                                            if (eg!==null) {
+                                                this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/#/event?e="+e.Hash+"&g="+eg.EventGuestID);
+                                            }
                                             return "OK";
                                         });
 
                                     }
                                     else {
-                                        this.db.EventGuests.findOne({
+                                        return this.db.EventGuests.findOne({
                                             PhoneNumber: CreatorPhone
                                         }).then(eg=> {
-                                            this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/#/event?e="+e.Hash+"&g="+eg.EventGuestID);
+                                            if (eg!==null) {
+                                                this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/#/event?e="+e.Hash+"&g="+eg.EventGuestID);
+                                            }
                                             return "OK";
                                         });
                                     }
                                 }
                                 else if (e.NotifyWhenGuestsAccept===true) {
-                                    this.db.EventGuests.findOne({
+                                    return this.db.EventGuests.findOne({
                                         EventGuestID: ESGID
                                     }).then(eg=> {
-                                        this.objs.messageobj.sendMessage(e.CreatorPhone, eg.GuestName+" has "+(rsvp===true?"accepted":"rejected")+" your invitation to "+e.EventName);
+                                        if (eg!==null) {
+                                            this.objs.messageobj.sendMessage(e.CreatorPhone, eg.GuestName+" has "+(rsvp===true?"accepted":"rejected")+" your invitation to "+e.EventName);
+                                        }
                                         return "OK";
                                     })
                                 }
@@ -308,8 +451,10 @@ class events {
                             EventScheduleID: es[0].EventScheduleID
                         }).then(esg=> {
 
+                         
                             r.Guests=[];
                             r.EGID=null;
+                            r.IsOwner=false;
                             r.NeedsAcceptance=null;
                             r.Acceptance=null;
 
@@ -331,6 +476,9 @@ class events {
                                         r.NeedsAcceptance=(accpt===null)?true:false;
                                         r.Acceptance=accpt;
                                         egid=r.EGID;
+                                        if (r.CreatorID===me) {
+                                            r.IsOwner=true;
+                                        }
                                     }
                                 }
                                 else {
@@ -339,6 +487,9 @@ class events {
                                         r.NeedsAcceptance=(accpt===null)?true:false;
                                         r.Acceptance=accpt;
                                         egid=r.EGID;
+                                        if (r.CreatorPhone==eg[g].PhoneNumber) {
+                                            r.IsOwner=true;
+                                        }
                                     }
                                 }
                                             
@@ -364,7 +515,7 @@ class events {
                             }
                             else {
                                 // If guests can't bring others then we need some ID to show the page
-                                if (r.EGID===null) {
+                                if (r.EGID===null && r.CreatorID!==me) {
                                     return null;
                                 }
                             }
@@ -374,9 +525,25 @@ class events {
                             }).then(ec=> {
                                 r.Comments=[];
                                 if (ec!=null && ec.length>0) {
-                                    r.Comments = this.objs.utilityobj.createTree(ec,"00000000-0000-0000-0000-000000000000");
+                                    r.Comments = this.objs.utilityobj.createTree(ec,"00000000-0000-0000-0000-000000000000",0);
                                 }
-                                return r;
+                                return this.db.EventSuggestedTimes.find({
+                                    EventID: r.EventID,
+                                    IterationNum: es[0].IterationNum
+                                }).then(est=>{
+                                    return this.db.EventSuggestedLocations.find({
+                                        EventID: r.EventID,
+                                        IterationNum: es[0].IterationNum
+                                    }).then(esl=>{
+                                        r.CreatorID=null;
+                                        r.CreatorPhone=null;
+                                        r.SuggestedTimesCount=est.length;
+                                        r.SuggestedLocationsCount=esl.length;
+                                        return r;
+                                    })
+                                })
+
+                                
                             }) 
                         });
                     }) 
@@ -521,6 +688,23 @@ class events {
         })
     }
 
+    locationFinder(query, coords, keyword, resp) {
+        if (keyword===null) {
+            this.objs.googleplaces.placeSearch({
+                location:coords,
+                rankby:'distance',
+                types:query
+            }, resp);
+        }
+        else {
+            this.objs.googleplaces.placeSearch({
+                location:coords,
+                rankby:'distance',
+                keyword: keyword
+            }, resp);
+        }
+    }
+
     async phoneSecurity(actionReq,phone) {
         if (actionReq===1) {
             return "OK"
@@ -532,6 +716,114 @@ class events {
                 return "OK"
             }
             return null;
+        })
+    }
+
+    async rescheduleEvent(eventid,startdate,location,address,city,state,postalcode,flow) {
+        return await this.db.EventSchedules.findOne({
+            EventID: eventid,
+            Status: 0
+        }).then(es=> {
+            if (es!==null) {
+
+                return this.db.EventSchedules.update({
+                    EventScheduleID: es.EventScheduleID
+                },{
+                    Status: 1
+                }).then(u=>{
+
+                    if (startdate===null) {
+                        startdate=es.StartDate;
+                    }
+
+                    if (location===null) {
+                        location=es.Location;
+                    }
+
+                    if (address===null) {
+                        address=es.Address;
+                    }
+
+                    if (city===null) {
+                        city=es.City;
+                    }
+
+                    if (state===null) {
+                        state=es.State;
+                    }
+
+                    if (postalcode===null) {
+                        postalcode=es.PostalCode;
+                    }
+
+                    return this.db.EventSchedules.insert({
+                        EventScheduleID: this.objs.uuidv4(),
+                        EventID: eventid,
+                        IterationNum:es.IterationNum+1,
+                        StartDate: startdate,
+                        EventLength: es.EventLength,
+                        Status: 0,
+                        Location: location,
+                        Address: address,
+                        City: city,
+                        State: state,
+                        PostalCode: postalcode
+                    }).then(e=> {
+
+                        return this.db.EventScheduleGuests.find({
+                            EventScheduleID: es.EventScheduleID
+                        }).then(esg=>{
+                            for(var x=0; x<esg.length; x++) {
+                                this.db.EventScheduleGuests.insert({
+                                    EventScheduleGuestID: this.objs.uuidv4(),
+                                    EventScheduleID: e.EventScheduleID,
+                                    Acceptance: null,
+                                    EventGuestID: esg[x].EventGuestID,
+                                    PhoneID: esg[x].PhoneID,
+                                    SpecialSend: 0
+                                })
+                            }
+
+                            return this.db.Events.find({
+                                EventID: eventid
+                            }).then(ev=>{
+                                var areq=1;
+
+                                if (flow===0) {
+                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event/activity "+ev.EventName+" has been rescheduled");
+                                }
+                                if (flow===1 && ev.MustApproveDiffLocation===true) {
+                                    areq=5;
+                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event/activity "+ev.EventName+" has been rescheduled due to attendee location preferences. You must view/approve these changes: https://schd.us/app/index.html#/event?e="+ev.Hash);
+                                }
+                                else if (flow===2 && ev.MustApproveDiffTime===true) {
+                                    areq=6;
+                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event/activity "+ev.EventName+" has been rescheduled due to attendee time preferences. You must view/approve these changes: https://schd.us/app/index.html#/event?e="+ev.Hash);
+                                }
+                                else if (ev.NotifyEventRescheduled===true) {
+                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event/activity "+ev.EventName+" has been rescheduled due to attendee preferences. View here: https://schd.us/app/index.html#/event?e="+ev.Hash);
+                                }
+
+                                return this.db.Events.update({
+                                    EventID: eventid
+                                },{
+                                    ActionReq:areq,
+                                    Reschedule:true
+                                }).then(pox=>{
+                                    
+                                    return "OK"
+                                })
+
+                            })   
+        
+                        })
+                    })
+
+                })
+            }
+            else {
+                return "An unexpected error occurred"
+            }
         })
     }
 
@@ -594,6 +886,150 @@ class events {
         })
     }
 
+    async suggestNewLocation(eventid,evguestid,location,address,city,state,postalcode) {
+        return await this.getEventById(eventid).then(e=> {
+            return this.db.EventSuggestedLocations.find({
+                EventID: eventid
+            }).then(allest=>{
+
+                for(var echeck=0; echeck<allest.length; echeck++) {
+                    if (allest[echeck].EventGuestID===evguestid && e.Schedules[0].IterationNum===allest[echeck].IterationNum) {
+                        return "AlreadyPresent";
+                    }
+                }
+                return this.db.EventSuggestedLocations.insert({
+                    EventSuggestedLocationID: this.objs.uuidv4(),
+                    EventID: eventid,
+                    Location: location,
+                    Street: address,
+                    City: city,
+                    State: state,
+                    PostalCode: postalcode,
+                    EventGuestID: evguestid,
+                    IterationNum: e.Schedules[0].IterationNum
+                }).then(esl=>{
+                    allest.push(esl);
+                
+                    for(var y=0; y<allest.length; y++) {
+                        var voteCount=0; 
+                        if (allest[y].IterationNum===e.Schedules[0].IterationNum) {
+                            voteCount++;
+                        }
+                    }
+                    if (voteCount>=(e.Guests.length/2)) {
+                        var pollResults=[];
+                        for(var tg=0; tg<allest.length; tg++) {
+                            
+                            var foundPR=false;
+                            for(var pr=0; pr<pollResults.length; pr++) {
+                                if (pollResults[pr].Address===allest[tg].Street && pollResults[pr].City===allest[tg].City) {
+                                    foundPR=true;
+                                    pollResults[pr].Count++;
+                                }
+                            }
+
+                            if (!foundPR) {
+                                pollResults.push({
+                                    Location: allest[tg].Location,
+                                    Address: allest[tg].Street,
+                                    City: allest[tg].City,
+                                    State: allest[tg].State,
+                                    PostalCode: allest[tg].PostalCode,
+                                    Count:1
+                                });
+                            }
+                        }
+
+
+                        var winner={Count:0};
+                        for(var w=0; w<pollResults.length; w++) {
+                            if (pollResults[w].Count>winner.Count) {
+                                winner=pollResults[w];
+                            }
+                        }
+
+                        return this.rescheduleEvent(eventid,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1).then(rse=> {
+                            return "OK"
+                        })
+                    }
+                    else {
+                        return "OK"
+                    }
+                })
+                
+            })
+        });
+    }
+
+    async suggestNewTime(eventid,evguestid,evtime) {
+        return await this.getEventById(eventid).then(e=> {
+            return this.db.EventSuggestedTimes.find({
+                EventID: eventid
+            }).then(allest=>{
+
+                for(var echeck=0; echeck<allest.length; echeck++) {
+                    if (allest[echeck].EventGuestID===evguestid && e.Schedules[0].IterationNum===allest[echeck].IterationNum) {
+                        return "AlreadyPresent";
+                    }
+                }
+
+                return this.db.EventSuggestedTimes.insert({
+                    EventSuggestedTimeID: this.objs.uuidv4(),
+                    EventID: eventid,
+                    StartDate: evtime,
+                    EventGuestID: evguestid,
+                    IterationNum: e.Schedules[0].IterationNum
+                }).then(est=>{
+
+                    allest.push(est);
+                
+                    for(var y=0; y<allest.length; y++) {
+                        var voteCount=0; 
+                        if (allest[y].IterationNum===e.Schedules[0].IterationNum) {
+                            voteCount++;
+                        }
+                    }
+                    if (voteCount>=(e.Guests.length/2)) {
+                        var pollResults=[];
+                        for(var tg=0; tg<allest.length; tg++) {
+                            
+                            var foundPR=false;
+                            for(var pr=0; pr<pollResults.length; pr++) {
+                                if (pollResults[pr].Time===allest[tg].StartDate) {
+                                    foundPR=true;
+                                    pollResults[pr].Count++;
+                                }
+                            }
+
+                            if (!foundPR) {
+                                pollResults.push({
+                                    Time: allest[tg].StartDate,
+                                    Count:1
+                                });
+                            }
+                        }
+
+
+                        var winner={Count:0};
+                        for(var w=0; w<pollResults.length; w++) {
+                            if (pollResults[w].Count>winner.Count) {
+                                winner=pollResults[w];
+                            }
+                        }
+
+                        return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,2).then(rse=> {
+                            return "OK"
+                        })
+
+                    }
+                    else {
+                        return "OK"
+                    }
+                })
+            })
+        });
+    }
+
     validateEvent(req,cli,sdate) {
 
         try {
@@ -617,11 +1053,15 @@ class events {
                 return "City is invalid";
             }
 
-            if (!this.objs.utilityobj.getUSStates().hasOwnProperty(req.body.EventState)) {
+            if (req.body.EventState!==null && req.body.EventState.length>0 && !this.objs.utilityobj.getUSStates().hasOwnProperty(req.body.EventState)) {
                 return "State is invalid";
             }
 
-            if (req.body.EventZip.length!==5 && req.body.EventZiplength!==10) {
+            if (req.body.EventDescription.length>1024) {
+                return "Event description is invalid";
+            }
+
+            if (req.body.EventZip!==null && req.body.EventZip.length>0 && req.body.EventZip.length!==5 && req.body.EventZiplength!==10) {
                 return "Postal code is invalid";
             }            
 

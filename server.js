@@ -16,11 +16,14 @@ const pickforuscls = require('./libraries/pickforus')
 const twilio = require('twilio')
 const awssdk = require('aws-sdk')
 const xss = require('xss')
+const googleplaces = require("googleplaces");
+const GoogleGeocoder = require('google-geocoder');
 
 const dbConfig = config.get('ScheduleUs.dbConfig');
 const twConfig = config.get('ScheduleUs.twilio');
 const rcConfig = config.get('ScheduleUs.recaptcha');
 const evConfig = config.get('ScheduleUs.evConfig');
+const googConfig = config.get('ScheduleUs.googConfig');
 
 awssdk.config.update({region: 'us-east-1'})
 
@@ -45,7 +48,11 @@ massive({
     uuidv4: uuidv4,
     uuidvalidate: uuidvalidate,
     envURL: evConfig.envURL,
-    xss: xss
+    xss: xss,
+    googleplaces: new googleplaces(googConfig.apiKey, "json"),
+    geocoder: new GoogleGeocoder({
+        key: googConfig.mapsKey
+    })
   }
 
   objs.utilityobj._setObjs(objs);
@@ -262,6 +269,9 @@ massive({
   app.post('/createaccount', function (req, res)
   {
       try {
+        res.send({status:500, message:"New account creation disabled"});
+        return;
+
         objs.clientobj.verifyCaptcha(req.body.recaptchaToken).then(re => {
            if (re==="OK") {
 
@@ -473,6 +483,29 @@ massive({
       }
   })
 
+  app.post('/locationfinder', function(req, res) {
+     try {
+         if (req.body.PickLocation===true) {
+       
+            objs.geocoder.find(req.body.Geocode, function(err,r) {
+
+                objs.eventsobj.locationFinder(req.body.Place, [r[0].location.lat,r[0].location.lng], req.body.Keyword, function(error,response) {
+                  response.foundCoords=[r[0].location.lat,r[0].location.lng];
+                  res.send({ status: 200, message:JSON.stringify(response) })
+                });
+            });
+         }
+         else {
+            objs.eventsobj.locationFinder(req.body.Place, req.body.Coords, req.body.Keyword, function(error,response) {
+              res.send({ status: 200, message:JSON.stringify(response) })
+            });
+         }
+     }
+     catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+     }
+  })
+
   app.post('/login', function(req, res) {
     try {
         var phone=req.body.Phone;
@@ -555,6 +588,38 @@ massive({
     }
     catch(e) {
         res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/suggestnewlocation', function(req, res) {
+    try {
+       objs.eventsobj.suggestNewLocation(req.body.EventID, req.body.EventGuestID, req.body.Location, req.body.Address, req.body.City, req.body.State, req.body.PostalCode).then(r=>{
+          if (r==="OK") {
+            res.send({ status: 200, message:"OK" });
+          }        
+          else {
+            res.send({ status: 500, message:r });
+          }
+       })
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/suggestnewtime', function(req, res) {
+    try {
+       objs.eventsobj.suggestNewTime(req.body.EventID, req.body.EventGuestID, req.body.EvTime).then(r=>{
+          if (r==="OK") {
+            res.send({ status: 200, message:"OK" });
+          }        
+          else {
+            res.send({ status: 500, message:r });
+          }
+       })
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
     }
   })
 

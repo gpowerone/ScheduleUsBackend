@@ -23,7 +23,7 @@ const Insert = function (source, record, options = {}) {
   this.stream = options.stream;
   this.onConflictIgnore = options.onConflictIgnore;
   this.onConflictUpdate = options.onConflictUpdate;
-  this.onConflictUpdateExcludes = options.onConflictUpdateExcludes;
+  this.onConflictUpdateExclude = options.onConflictUpdateExclude;
   this.deepInsert = Object.prototype.hasOwnProperty.call(options, 'deepInsert') && !!options.deepInsert;
 
   // get fields to return from options

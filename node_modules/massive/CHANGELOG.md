@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [5.11.2](https://gitlab.com/dmfay/massive-js/compare/v5.11.1...v5.11.2) (2019-07-17)
+
+
+### Bug Fixes
+
+* initialize inserts with correct onConflictUpdateExclude option ([d868714](https://gitlab.com/dmfay/massive-js/commit/d868714))
+
+
+
 ### [5.11.1](https://gitlab.com/dmfay/massive-js/compare/v5.11.0...v5.11.1) (2019-07-12)
 
 
