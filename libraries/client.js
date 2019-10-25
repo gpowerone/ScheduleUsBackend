@@ -10,6 +10,10 @@ class client {
         return await this.getClientByPhone(sPhone).then(r => {
             if (r!==null) {
 
+                if (r.AccountType!==0) {
+                    return "Cannot recover this account because it was created through Google or Facebook";
+                }
+
                 var hsh=this.objs.utilityobj.createHash(42);
 
                 return this.db.Clients.update({
@@ -19,7 +23,7 @@ class client {
                 }).then(cr=> {
 
                     // Reset URL
-                    this.objs.messageobj.sendMessage(sPhone, "Click here to recover your Schedule Us account: https://"+this.objs.envURL+"/#/recover?c="+r.ClientID+"&v="+hsh);
+                    this.objs.messageobj.sendMessage(sPhone, "Click here to recover your Schedule Us account: https://"+this.objs.envURL+"/recover?c="+r.ClientID+"&v="+hsh);
 
                     return "OK";
                 })
@@ -82,6 +86,161 @@ class client {
         })
     }
 
+    async addAvatar(ablob) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c===null) {
+                return "Invalid Operation";
+            }
+
+
+            return this.objs.jimp.read(ablob).then(image=>{
+
+                return image.resize(36,36).getBufferAsync(this.objs.jimp.MIME_PNG).then(rsimage=>{
+
+                    const s3 = new this.objs.aws.S3();
+                    const params={
+                        Bucket: 'schedus-images',
+                        Key: c,
+                        Body: rsimage,
+                        ACL: 'public-read'
+                    }            
+        
+                    var self=this;
+                    s3.upload(params, function(err,data) {        
+                        self.objs.cfrontinvalidate("ESPLOB5ZISSCS",['/'+c]).then((data) => {
+                      
+                        });                 
+                    })
+        
+                    return "OK";
+
+                }).catch(err=>{
+                    console.log("Problem processing image");
+                })
+ 
+            }).catch(err=>{
+                console.log("Problem processing image 2");
+            })
+      
+        })
+    }
+
+    async addCalendar(cType, code) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c===null) {
+                return "Invalid Operation";
+            }
+
+            if (cType===0) {
+                return this.objs.axios.post("https://accounts.google.com/o/oauth2/token", {
+                    code: code,
+                    client_id: this.objs.googcalcliid,
+                    client_secret: this.objs.googcalsecret,
+                    redirect_uri: "https://"+this.objs.envURL+"/googcalendar",
+                    grant_type: "authorization_code"
+
+                }).then((res)=>{
+
+                    return this.db.ClientCalendar.insert({
+                        ClientCalendarID: this.objs.uuidv4(),
+                        ClientID: c,
+                        CalendarType: cType,
+                        CalendarToken: res.data.refresh_token
+                    }).then(p=>{
+                        return "OK";
+                    })
+
+                }).catch((error)=>{
+                    return "Error";
+                })
+            }
+        })
+    }
+
+    async addGroup(groupname, clients) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c===null) {
+                return "Invalid Operation";
+            }
+
+            if (groupname.length===0 || groupname.length>128) {
+                return "Group name is either too short or too long";
+            }
+
+            return this.db.ClientGroups.insert({
+                ClientGroupID: this.objs.uuidv4(),
+                ClientID: c,
+                GroupName: groupname
+            }).then(g=>{
+                for(var cn=0; cn<clients.length; cn++) {
+                    
+                    var tclient=clients[cn];
+
+                    this.db.Clients.find({
+                        or:[
+                            {PhoneNumber: clients[cn].PhoneNumber},
+                            {EmailAddress: clients[cn].EmailAddress}
+                        ]
+                    }).then(fc=>{
+                        var cl=null;
+                        if (fc!==null && fc.length>0) {
+                            cl=fc[0].ClientID;
+                        }
+
+                        this.db.ClientGroupClients.insert({
+                            ClientGroupClientID: this.objs.uuidv4(),
+                            ClientGroupID: g.ClientGroupID,
+                            ClientID: cl,
+                            PhoneNumber: tclient.PhoneNumber,
+                            EmailAddress: tclient.EmailAddress,
+                            Name: tclient.Name
+                        });
+             
+                    })                
+                }
+
+                return "OK";
+            })
+        })
+    }
+
+    async addToGroup(clientgroupid, client) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c===null) {
+                return "Invalid Operation";
+            }
+
+            return this.db.ClientGroups.findOne({
+                ClientGroupID: clientgroupid,
+                ClientID: c
+            }).then(g=>{
+               
+                this.db.Clients.find({
+                    or:[
+                        {PhoneNumber: client.PhoneNumber},
+                        {EmailAddress: client.EmailAddress}
+                    ]
+                }).then(fc=>{
+                    var cl=null;
+                    if (fc!==null && fc.length>0) {
+                        cl=fc[0].ClientID;
+                    }
+
+                    this.db.ClientGroupClients.insert({
+                        ClientGroupClientID: this.objs.uuidv4(),
+                        ClientGroupID: g.ClientGroupID,
+                        ClientID: cl,
+                        PhoneNumber: client.PhoneNumber,
+                        EmailAddress: client.EmailAddress
+                    });
+            
+                })                
+            
+
+            })
+        })
+    }
+
     async changeNumber(passwd,phone) {
         return await this.objs.sessionobj.verify().then(c=> {
             
@@ -110,7 +269,7 @@ class client {
                                 this.objs.sessionobj.deleteForClient(c);
 
                                 // Verification
-                                this.objs.messageobj.sendMessage(sPhone, "Click the link to verify your new phone number: https://"+this.objs.envURL+"/#/verify?c="+c+"&v="+hsh+"&cp=yes");
+                                this.objs.messageobj.sendMessage(sPhone, "Click the link to verify your new phone number: https://"+this.objs.envURL+"/verify?c="+c+"&v="+hsh+"&cp=yes");
                                 
                                 return "OK";
                             }
@@ -162,7 +321,7 @@ class client {
         this.objs.xss(params.ContactReason)+"<br />Details:<br />"+
         this.objs.xss(params.ContactDetails);
 
-        this.objs.messageobj.sendEmail("gpowerone@yahoo.com","Schdule Us Contact", msg);
+        this.objs.messageobj.sendEmail("admin@schd.us","Schedule Us Contact", msg);
         return "OK";
     }
 
@@ -183,8 +342,13 @@ class client {
             VerificationResend: 0,
             Verification: this.objs.utilityobj.createHash(64)
         }).then(r=> {
+            // Remove opt out
+            this.db.OptOut.destroy({
+                PhoneNumber: phone
+            });
+
             // Send verification message
-            this.objs.messageobj.sendMessage(phone, "Welcome to Schedule Us! Click the link to verify your account: https://"+this.objs.envURL+"/#/verify?c="+r.ClientID+"&v="+r.Verification);
+            this.objs.messageobj.sendMessage(phone, "Welcome to Schedule Us! Click the link to verify your account: https://"+this.objs.envURL+"/verify?c="+r.ClientID+"&v="+r.Verification);
 
             return "OK";
         })
@@ -195,11 +359,29 @@ class client {
         return await this.objs.sessionobj.verify().then(c=> {
             this.objs.sessionobj.deleteForClient(c);
 
-            this.db.Clients.destroy({
-                ClientID: c
-            })
+            return this.db.Events.find({
+                CreatorID: c,
+                ActionReq: 2
+            }).then(e=>{
 
-            return "OK";
+                for(var xe=0; xe<e.length; xe++) {
+                    this.objs.eventsobj.cancelEvent(e.EventID);
+                }
+
+                var self=this;
+                setTimeout(function() {
+                    return self.db.Events.destroy({
+                        CreatorID: c
+                    }).then(q=>{
+                        self.db.Clients.destroy({
+                            ClientID: c
+                        })  
+                    })
+                },3500)
+
+                return "OK";
+
+            })    
         })
     }
 
@@ -256,6 +438,33 @@ class client {
         })
     }
 
+    async emailOptOut(EmailAddress) {
+        return await this.db.EmailOptOut.findOne({
+            EmailAddress: EmailAddress
+        }).then(r=>{
+            if (r===null) {
+                this.db.Clients.findOne({
+                    EmailAddress: EmailAddress
+                }).then(p=>{
+                    if (p===null) {
+                        this.db.EmailOptOut.insert({
+                            EmailAddress: EmailAddress
+                        });
+                        return "OK";
+                    }
+                    else {
+                        return "NO";
+                    }
+                })
+               
+            }
+            else {
+
+                return "OK";
+            }
+        })
+    }
+
     async fillName(FirstName,LastName) {
 
         return await this.objs.sessionobj.verify().then(c=> {
@@ -266,6 +475,10 @@ class client {
 
             return this.getClientByID(c).then(r=> {
                 if (r!==null) {
+
+                    if (r.AccountType!==0) {
+                        return false;
+                    }
 
                     if (FirstName.length>64 || LastName.length>64) {
                         return false;
@@ -317,6 +530,33 @@ class client {
         });
     }
 
+    async getClientsForGroup(clientgroupid) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            return this.db.ClientGroups.findOne({
+                ClientID: c,
+                ClientGroupID: clientgroupid
+            }).then(cgs=>{
+                return this.db.ClientGroupClients.find({
+                    ClientGroupID: clientgroupid
+                }).then(cgcs=>{
+                    cgs.Clients=cgcs;
+                    return cgs;
+                })
+            })
+
+        });
+    }
+
+    async getGroupsForClient() {
+        return await this.objs.sessionobj.verify().then(c=> {
+            return this.db.ClientGroups.find({
+                ClientID: c
+            }).then(cgs=>{
+                return cgs; 
+            })
+        })
+    }
+
     async login(phone,passwd,email,clientid) {
 
         var conditional=[];
@@ -340,7 +580,8 @@ class client {
         }
 
         return await this.db.Clients.findOne({
-            or: conditional
+            or: conditional,
+            AccountType: 0
         }).then(r=> {  
             if (r!==null) {
                 if (r.FailedAttempts<6) {
@@ -397,10 +638,64 @@ class client {
                 }
             }
             else {
-                console.log("hi");
                 return "Invalid Credentials";
             }
         })    
+    }
+
+    async removeFromGroup(clientgroupid,clientgroupclientid) {
+        return await this.objs.sessionobj.verify().then(c=> {
+                
+            if (c===null) {
+                return "Invalid Credentials";
+            }
+
+            return this.db.ClientGroups.findOne({
+                ClientGroupID: clientgroupid,
+                ClientID: c
+            }).then(cg=>{
+                if (cg!==null) {
+                    return this.db.ClientGroupClients.destroy({
+                        ClientGroupID: clientgroupid,
+                        ClientGroupClientID: clientgroupclientid
+                    }).then(cgc=>{
+                        return "OK";
+                    })
+                }
+                else {
+                    return "Invalid Credentials";
+                }
+            });
+        })
+    }
+
+    async removeGroup(clientgroupid) {
+        return await this.objs.sessionobj.verify().then(c=> {
+                
+            if (c===null) {
+                return "Invalid Credentials";
+            }
+
+            return this.db.ClientGroups.findOne({
+                ClientGroupID: clientgroupid,
+                ClientID: c
+            }).then(cg=>{
+                if (cg!==null) {
+                    return this.db.ClientGroupClients.destroy({
+                        ClientGroupID: clientgroupid
+                    }).then(cgc=>{
+                        return this.db.ClientGroups.destroy({
+                            ClientGroupID: clientgroupid
+                        }).then(p=>{
+                            return "OK";
+                        }) 
+                    })
+                }
+                else {
+                    return "Invalid Credentials";
+                }
+            });
+        })
     }
 
     async resendText(clientid) {
@@ -416,7 +711,7 @@ class client {
                         VerificationResend: r.VerificationResend
                     });
 
-                    self.objs.messageobj.sendMessage(r.PhoneNumber,"Welcome to Schedule Us! Click the link to verify your account: https://"+this.objs.envURL+"/#/verify?c="+r.ClientID+"&v="+r.Verification);
+                    self.objs.messageobj.sendMessage(r.PhoneNumber,"Welcome to Schedule Us! Click the link to verify your account: https://"+this.objs.envURL+"/verify?c="+r.ClientID+"&v="+r.Verification);
                     
                     return "OK";
                 }   
@@ -440,7 +735,7 @@ class client {
                     EmailAddress: emailaddress,
                     Verification: this.objs.utilityobj.createHash(64)
                 }).then(r=> {
-                    this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click https://"+this.objs.envURL+"/#/verifyemail?c="+c+"&v="+r.Verification+" to verify your email address");
+                    this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click https://"+this.objs.envURL+"/verifyemail?c="+c+"&v="+r.Verification+" to verify your email address");
 
                     return "OK";
                 });
@@ -517,6 +812,10 @@ class client {
                             EmailAddress: r.EmailAddress
                         }).then(q=> {
 
+                            self.db.EmailOptOut.destroy({
+                                EmailAddress: r.EmailAddress
+                            });
+
                             return self.db.ClientEmailVerification.destroy({
                                 ClientEmailVerificationID: r.ClientEmailVerificationID
                             }).then(d=> {
@@ -547,6 +846,107 @@ class client {
   
         return await this.objs.request(verifyCaptchaOptions).then(r=>  {
                 return "OK"
+        });
+    }
+
+    async verifyGoogleLogin(token,phone,email) {
+        const client = new this.objs.googauth("801199894294-ph8llsbfnu6lovla7ed46mq0rvk9rbnm.apps.googleusercontent.com");
+        return await client.verifyIdToken({
+            idToken: token,
+            audience: "801199894294-ph8llsbfnu6lovla7ed46mq0rvk9rbnm.apps.googleusercontent.com"  
+        }).then(t=>{
+        
+            const payload = t.getPayload();
+            if (email===payload.email && payload.email_verified===true) {
+        
+        
+                return this.db.Clients.findOne({
+                    EmailAddress: email,
+                    AccountType: 1
+                }).then(c=>{
+
+                    if (c!==null) {
+
+                        if (c.Verification!==null) {
+                            return c.ClientID;
+                        }
+
+                        return this.db.Clients.update({
+                            ClientID: c.ClientID
+                        },{
+                            FirstName: payload.given_name,
+                            LastName: payload.family_name
+                        }).then(q=>{
+
+                            return this.objs.sessionobj.deleteForClient(c.ClientID).then(dc=> {
+                                return this.objs.sessionobj.create(c.ClientID).then(s=> {
+                                    s.UserName=c.FirstName+" "+c.LastName;
+                                    return this.objs.xss(JSON.stringify(s));
+                                });
+                            });
+                        })
+
+                    }
+                    else {
+
+                        if (phone===null) {
+                            return "NEEDPHONE"
+                        }
+                        else {
+                            phone = this.objs.utilityobj.standardizePhone(phone);
+                            if (phone==="NotOK") {
+                                return "Phone number is not formatted correctly";
+                            }
+                        }
+
+                        return this.db.Clients.findOne({
+                            PhoneNumber: phone
+                        }).then(cl=>{
+
+                            if (cl!==null) {
+                                return "Error: This phone number is already in use";
+                            }
+                            
+                            return this.db.Clients.insert({
+                                ClientID: this.objs.uuidv4(),
+                                FailedAttempts: 0,
+                                AccountType: 1,
+                                Password: "",
+                                HasImage: false,
+                                Enabled: true,
+                                PhoneNumber: phone,
+                                EmailAddress: email,
+                                FirstName: payload.given_name,
+                                LastName: payload.family_name,
+                                IsPremium: false,
+                                SecQuestion: 0,
+                                SecAnswer: "",
+                                VerificationResend: 0,
+                                Verification: this.objs.utilityobj.createHash(64)
+                            }).then(r=> {
+                                // Remove opt out
+                                this.db.OptOut.destroy({
+                                    PhoneNumber: phone
+                                });
+                                this.db.EmailOptOut.destroy({
+                                    EmailAddress: email
+                                });
+
+                                // Send verification message
+                                this.objs.messageobj.sendMessage(phone, "Welcome to Schedule Us! Click the link to verify your account: https://"+this.objs.envURL+"/verify?c="+r.ClientID+"&v="+r.Verification);
+
+                                return "OK";
+                            })
+                        });
+                    }
+
+                });
+                
+            }
+            else {
+                return "Could not verify Google credentials";
+            }
+     
         });
     }
 

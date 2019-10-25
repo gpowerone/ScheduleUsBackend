@@ -79,15 +79,14 @@ class events {
                                     ParentID: parentID,
                                     CreationDate: new Date().getTime()
                                 }).then(r=> {
-                                    if (e.NotifyOnNewMessages===true) {
-                                        this.objs.messageobj.sendMessage(e.CreatorPhone, c+" commented on your event/activity "+e.EventName+ " https://"+this.objs.envURL+"/#/event?e="+e.Hash);
-                                    }
+                                   
+                                    r.IndentLevel="i-1";
         
-                                    return "OK";
+                                    return JSON.stringify(r);
                                 });
                             }
                             else {
-                                return "Invalid Parent";
+                                return "Invalid";
                             }
                         })
                     }
@@ -102,11 +101,10 @@ class events {
                             ParentID: parentID,
                             CreationDate: new Date().getTime()
                         }).then(r=> {
-                            if (e.NotifyOnNewMessages===true) {
-                                this.objs.messageobj.sendMessage(e.CreatorPhone, c+" commented on your event/activity "+e.EventName+ " https://"+this.objs.envURL+"/#/event?e="+e.Hash);
-                            }
+                           
+                            r.IndentLevel="i-0";
 
-                            return "OK";
+                            return JSON.stringify(r);
                         });
                     }
                 }
@@ -119,19 +117,22 @@ class events {
 
     async addGuest(eventID, guest, isOrg, clientID) {
 
-        if (guest.gemail!==null && guest.gemail!=="Not Specified" && this.objs.utilityobj.verifyEmail(guest.gemail)!=="OK") {
+        if (guest.gemail!==null && guest.gemail.length>0 && guest.gemail!=="Not Specified" && this.objs.utilityobj.verifyEmail(guest.gemail)!=="OK") {
             return new Promise(null);
         }
 
-        if (guest.gphone!==null && guest.gphone!=="Not Specified" && this.objs.utilityobj.verifyPhone(guest.gphone)!=="OK") {
+        if (guest.gphone!==null && guest.gphone.length>0 && guest.gphone!=="Not Specified" && this.objs.utilityobj.verifyPhone(guest.gphone)!=="OK") {
             return new Promise(null);
         }
 
-        if ((guest.gemail===null && guest.gphone===null) || (guest.gemail==="Not Specified" && guest.gphone==="Not Specified")) {
+        if (((guest.gemail===null||guest.gemail.length===0) && (guest.gphone===null||guest.gphone.length===0)) || (guest.gemail==="Not Specified" && guest.gphone==="Not Specified")) {
             return new Promise(null);
         }
 
         var phone = this.objs.utilityobj.standardizePhone(guest.gphone);
+        if (phone=="NotOK") {
+            phone=null;
+        }
 
         return await this.db.EventGuests.insert({
             EventID: eventID,
@@ -148,38 +149,86 @@ class events {
         
     }
 
-    async addScheduledGuest(eventScheduleID,eventGuestID) {
+    async addScheduledGuest(eventScheduleID,eventGuestID,newSS,eventobj,egobj) {
         return await this.getPhoneID(eventGuestID).then(ph=> {
             this.db.EventScheduleGuests.insert({
                 EventGuestID: eventGuestID,
-                Acceptance: true,
+                Acceptance: newSS===true?null:true,
                 EventScheduleGuestID: this.objs.uuidv4(),
                 EventScheduleID: eventScheduleID,
-                PhoneID: ph,
-                SpecialSend: 0
+                PhoneID: ph
             })
+
+            if (newSS) {
+
+                var esobj = eventobj.Schedules[0];
+
+                return this.db.PhoneNumbers.findOne({
+                    PhoneID: ph
+                }).then(p=> {
+
+                    if (egobj.EmailAddress===null || egobj.EmailAddress.length===0 || egobj.EmailAddress==="Not Specified") {
+                        var msg= eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
+                        esobj.Location+" ("+esobj.Address+" "+esobj.City+", "+esobj.State+" "+esobj.PostalCode+") on "+
+                        this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate);
+
+
+                        this.db.Partials.insert({
+                            FromPhone: p.PhoneNumber,
+                            PartialID: this.objs.uuidv4(),
+                            PhoneNumber: egobj.PhoneNumber,
+                            EmailAddress: "",
+                            Message: msg,
+                            Subject: null
+                        });
+                    }
+                    else {
+                        var msg="<h3> Dear "+egobj.GuestName+",</h3>"+
+                        "<p>"+eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
+                        esobj.Location+" ("+esobj.Address+" "+esobj.City+", "+esobj.State+" "+esobj.PostalCode+") on "+
+                        this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+"</p>";
+
+                        this.db.Partials.insert({
+                            FromPhone: null,
+                            PartialID: this.objs.uuidv4(),
+                            PhoneNumber: "",
+                            EmailAddress: egobj.EmailAddress,
+                            Message: msg,
+                            Subject: eventobj.CreatorName+" has invited you to "+eventobj.EventName
+                        });
+                    }
+                })
+            }
         })
     }
 
-    async completeVerification(eventID,hash) {
-        return await this.getEventById(eventid).then(e=> {
-            if (e!==null) {
-                if (e.Hash===hash) {
-                    self.db.Events.update({
-                        EventID: eventID
-                    }, {
-                        ActionReq: 1
-                    });
+    async cancelEvent(eventID) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            return this.getEventById(eventID).then(e=>{
+                if (e.CreatorID===c && e.ActionReq===2) {
+                    for(var x=0; x<e.Guests; x++) {
+                        this.removeAttendee(eventID,e.Guests[x].PhoneNumber,e.Guests[x].EmailAddress);
+                    }
+                    for (var x=0; x<e.Schedules.length; x++) {
+                        this.db.EventSchedules.destroy({
+                            EventID: eventID
+                        })
+                    }
+
+                    var self=this;
+                    setTimeout(function() {
+                        self.db.Events.destroy({
+                            EventID: eventID
+                        })
+                    },2000)
 
                     return "OK";
+                    
                 }
                 else {
-                    return "An error occurred";
+                    return "Invalid Operation";
                 }
-            }
-            else {
-                return "An error occurred";
-            }
+            });
         })
     }
 
@@ -193,96 +242,82 @@ class events {
 
        return await this.objs.sessionobj.verify().then(c=> {
             return this.objs.clientobj.getClientByID(c).then(cli=> {
+                return this.db.OptOut.find().then(optouts=>{
+                    return this.db.EmailOptOut.find().then(emailoptouts=>{
 
-                if (cli===null) {
-                    return "Account is required to create events right now"; 
-                }
+                        if (cli===null) {
+                            return "An account is required to create events"; 
+                        }
+        
+                        var edate = null; 
+                        var sdate = new Date(req.body.EventDate).getTime()+(parseInt(req.body.UTCOffset)*60*1000);
 
-                var actionReq=0;
-
-                var phone = this.objs.utilityobj.standardizePhone(req.body.ClientPhone);
-                if (phone==="NotOK") {
-                    return "Invalid Event";
-                }
-
-                var creatorID="00000000-0000-0000-0000-000000000000";
-
-                if (cli !==null) {
-                    if (phone===cli.PhoneNumber) {
-                        actionReq=1;
-                    }
-                    creatorID=cli.ClientID;
-                }
-
-
-                var sdate = new Date(req.body.EventDate).getTime()+req.body.UTCOffset;
-                var validationStatus = this.validateEvent(req,cli,sdate);
-                if (validationStatus==="OK") {
-                
-                    return this.phoneSecurity(actionReq,phone).then(ps=> {
-                        if (ps===null) {
-                            return "This phone number is associated with an account. You must log in."
+                        if (req.body.EndDate!==null) {
+                            edate = new Date(req.body.EndDate).getTime()+(parseInt(req.body.UTCOffset)*60*1000);
                         }
 
-                        return this.db.Events.insert({
-                            CreatorID: creatorID,
-                            CreatorPhone: phone,
-                            CreatorName: req.body.ClientName,
-                            EventID: this.objs.uuidv4(),
-                            EventName: req.body.EventName,
-                            Hash: this.createEvHash(),
-                            IsRecurring: req.body.EventIsRecurring,
-                            EventDescription: req.body.EventDescription,
-                            CreationDate: Date.now(),
-                            AllowReschedule: req.body.GuestsReschedule,
-                            AllowLocationChange:req.body.GuestsChangeLocation,
-                            ActionReq: actionReq,
-                            GuestListVisible:req.body.GuestListVisible,
-                            GuestsMustRegister:req.body.GuestsMustRegister,
-                            GuestsCanBringOthers:req.body.GuestsBringOthers,
-                            EventMaxCapacity:parseInt(req.body.GuestLimitTotal),
-                            AllowChildren: req.body.GuestsBringChildren,
-                            ProvideSharing: req.body.GuestsProvideSharing,
-                            NotifyWhenGuestsAccept:req.body.NotifyGuestAccept,
-                            NotifyOnNewMessages:req.body.NotifyNewMessages,
-                            NotifyEventRescheduled:req.body.NotifyEventRescheduled,
-                            NotifyLocationChanged:req.body.NotifyEventLocationChanges,
-                            GuestsCanChat:req.body.GuestsCanDiscuss,
-                            NotifySchedulingComplete:req.body.NotifyScheduleComplete,
-                            ReminderTime: req.body.ReminderTime,
-                            SeeRSVPed: req.body.GuestsSeeRSVPs,
-                            ScheduleCutoffTime:req.body.ScheduleCutoffTime,
-                            TimezoneOffset:req.body.UTCOffset,
-                            MustApproveDiffLocation: req.body.MustApproveDiffLocation,
-                            MustApproveDiffTime: req.body.MustApproveDiffTime,
-                            EventDate: sdate
-                        }).then(r=> {
-                            if (r!==null && typeof(r.EventID)!==undefined) {
-                        
-                                if (actionReq===1) {
-                                    return this.scheduleEvent(r.EventID, req.body, phone, sdate, creatorID).then(e=> {
-                                        return "?e="+r.Hash;
-                                    }); 
+                        var validationStatus = this.validateEvent(req,cli,sdate,edate,optouts,emailoptouts);
+                        if (validationStatus==="OK") {
+                              
+                            return this.db.Events.insert({
+                                CreatorID: cli.ClientID,
+                                CreatorPhone: cli.PhoneNumber,
+                                CreatorName: req.body.ClientName,
+                                EventID: this.objs.uuidv4(),
+                                EventName: req.body.EventName,
+                                Hash: this.createEvHash(),
+                                IsRecurring: req.body.EventIsRecurring,
+                                EventDescription: req.body.EventDescription,
+                                CreationDate: Date.now(),
+                                AllowReschedule: req.body.GuestsReschedule,
+                                AllowLocationChange:req.body.GuestsChangeLocation,
+                                ActionReq: 1,
+                                GuestListVisible:req.body.GuestListVisible,
+                                GuestsMustRegister:req.body.GuestsMustRegister,
+                                GuestsCanBringOthers:req.body.GuestsBringOthers,
+                                EventMaxCapacity:parseInt(req.body.GuestLimitTotal),
+                                AllowChildren: req.body.GuestsBringChildren,
+                                ProvideSharing: req.body.GuestsProvideSharing,                     
+                                GuestsCanChat:req.body.GuestsCanDiscuss,
+                                ReminderTime: req.body.ReminderTime==="yes",
+                                SeeRSVPed: req.body.GuestsSeeRSVPs,
+                                TimezoneOffset:parseInt(req.body.UTCOffset),
+                                MustApproveDiffLocation: req.body.MustApproveDiffLocation,
+                                MustApproveDiffTime: req.body.MustApproveDiffTime,
+                                EventDate: sdate,
+                                EndDate: edate
+                            }).then(r=> {
+                                if (r!==null && typeof(r.EventID)!==undefined) {
+                            
+                                    return this.db.Clients.update({
+                                        ClientID: cli.ClientID
+                                    },{
+                                        EventCnt: cli.EventCnt+1
+                                    }).then(c=> {
+                                        
+                                        return this.scheduleEvent(r.EventID, req.body, cli.PhoneNumber, sdate, edate, cli.ClientID).then(e=> {
+                                            return "?e="+r.Hash;
+                                        });                                
+                                    })
+                                
                                 }
                                 else {
-                                    return this.scheduleEvent(r.EventID, req.body, phone, sdate, creatorID).then(e=> {
-                                        this.verifyPhone(r.EventID, r.Hash, phone);
-                                        return "OK"; 
-                                    }); 
-                                    
+                                    return "Database failure";
                                 }
-                            }
-                            else {
-                                return "Database failure";
-                            }
-                        })
+                            })
+                        
+                        }
+                        else {
+                            return validationStatus;
+                        }
+
                     })
-                }
-                else {
-                    return validationStatus;
-                }
-            })
-       });       
+                })
+
+
+            });
+        });
+             
     }
 
     async declineReschedule(eventID,me,imic) {
@@ -339,6 +374,44 @@ class events {
         });
     }
 
+    async doLocationFinder(req,res) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            return this.objs.clientobj.getClientByID(c).then(cli=> {
+
+                if (cli===null) {
+                    return "You must be logged in to use the location finder";
+                }
+
+                if (cli.LFinderUsage>=15) {
+                    return "You have used the location finder the maximum number of times today. Please try again tomorrow";
+                }
+
+                return this.db.Clients.update({
+                    ClientID: cli.ClientID
+                },{
+                    LFinderUsage: cli.LFinderUsage+1
+                }).then(c=>{
+
+                    if (req.body.PickLocation===true) {
+            
+                        this.objs.geocoder.find(req.body.Geocode, function(err,r) {
+            
+                            this.objs.eventsobj.locationFinder(req.body.Place, [r[0].location.lat,r[0].location.lng], req.body.Keyword, function(error,response) {
+                                response.foundCoords=[r[0].location.lat,r[0].location.lng];
+                                res.send({ status: 200, message:JSON.stringify(response) })
+                            });
+                        });
+                    }
+                    else {
+                        this.objs.eventsobj.locationFinder(req.body.Place, req.body.Coords, req.body.Keyword, function(error,response) {
+                            res.send({ status: 200, message:JSON.stringify(response) })
+                        });
+                    }
+                })
+
+            });
+        });
+    }
 
     async doRSVP(eventid, eventscheduleid, rsvp, me) {
         return await this.db.EventScheduleGuests.find({
@@ -371,40 +444,20 @@ class events {
                             },{
                                 Acceptance: rsvp
                             }).then(p=>{
-                                if (e.NotifySchedulingComplete===true && accptCnt===es.length-1) {
+                                if (accptCnt===es.length-1) {
                                     if (e.CreatorID!=="00000000-0000-0000-0000-000000000000") 
                                     {  
                                         return this.db.EventGuests.findOne({
                                             ClientID: e.CreatorID
                                         }).then(eg=> {
                                             if (eg!==null) {
-                                                this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/#/event?e="+e.Hash+"&g="+eg.EventGuestID);
+                                                this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/event?e="+e.Hash+"&g="+eg.EventGuestID);
                                             }
                                             return "OK";
                                         });
 
-                                    }
-                                    else {
-                                        return this.db.EventGuests.findOne({
-                                            PhoneNumber: CreatorPhone
-                                        }).then(eg=> {
-                                            if (eg!==null) {
-                                                this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/#/event?e="+e.Hash+"&g="+eg.EventGuestID);
-                                            }
-                                            return "OK";
-                                        });
-                                    }
-                                }
-                                else if (e.NotifyWhenGuestsAccept===true) {
-                                    return this.db.EventGuests.findOne({
-                                        EventGuestID: ESGID
-                                    }).then(eg=> {
-                                        if (eg!==null) {
-                                            this.objs.messageobj.sendMessage(e.CreatorPhone, eg.GuestName+" has "+(rsvp===true?"accepted":"rejected")+" your invitation to "+e.EventName);
-                                        }
-                                        return "OK";
-                                    })
-                                }
+                                    }                                  
+                                }                          
                                 else {
                                     return "OK";
                                 }
@@ -471,7 +524,7 @@ class events {
                                 }
 
                                 if (imic) {
-                                    if (eg[g].ClientID===me) {                              
+                                    if (eg[g].ClientID===me) {                         
                                         r.EGID=eg[g].EventGuestID;
                                         r.NeedsAcceptance=(accpt===null)?true:false;
                                         r.Acceptance=accpt;
@@ -507,6 +560,13 @@ class events {
                                 }
                             }
 
+                            if (r.IsOwner) {
+                                for(var g=0; g<eg.length; g++) {
+                                    r.Guests[g].PhoneNumber=eg[g].PhoneNumber;
+                                    r.Guests[g].EmailAddress=eg[g].EmailAddress;
+                                }
+                            }
+
                             if (r.GuestsCanBringOthers===true) {
                                 r.MoreAllowed=true;
                                 if (r.EventMaxCapacity<=r.Guests.length) {
@@ -522,6 +582,10 @@ class events {
 
                             return this.db.EventComments.find({
                                 EventID: r.EventID
+                            },{
+                                order: [
+                                    {field: "CreationDate", direction: "desc"}
+                                ]
                             }).then(ec=> {
                                 r.Comments=[];
                                 if (ec!=null && ec.length>0) {
@@ -719,7 +783,71 @@ class events {
         })
     }
 
-    async rescheduleEvent(eventid,startdate,location,address,city,state,postalcode,flow) {
+    async removeAttendee(id,phone,email) {
+        return await this.getEventById(id).then(e=>{
+            var theguest=null;
+            for(var x=0; x<e.Guests.length; x++) {
+                if (e.Guests[x].PhoneNumber===phone || e.Guests[x].EmailAddress===email) {
+                    theguest=e.Guests[x];
+                }
+            }
+            if (theguest!==null) {
+
+                return this.db.EventScheduleGuests.findOne({
+                    EventGuestID: theguest.EventGuestID,
+                    EventScheduleID: e.Schedules[0].EventScheduleID
+                }).then(esg=>{
+                    return this.db.EventScheduleGuests.destroy({
+                        EventScheduleID: e.Schedules[0].EventScheduleID,
+                        EventGuestID: theguest.EventGuestID
+                    }).then(r=>{
+    
+                        return this.db.EventGuests.destroy({
+                            EventGuestID: theguest.EventGuestID
+                        }).then(qr=>{
+                            if (phone===null || phone==="Not Specified" || phone.length===0) { 
+                                this.db.Partials.insert({
+                                    FromPhone:null,
+                                    PartialID: this.objs.uuidv4(),
+                                    PhoneNumber:"",
+                                    EmailAddress: email,
+                                    Message: "<h3>Dear "+theguest.GuestName+",</h3><p>You have been uninvited from "+e.EventName+" by "+e.CreatorName+". The event may have been cancelled. Sorry :(</p>",
+                                    Subject: "Uninvited From "+e.EventName
+                                })
+
+                                return "OK";
+                            }
+                            else {
+                                return this.db.PhoneNumbers.findOne({
+                                    PhoneID: esg.PhoneID
+                                }).then(p=> {
+
+                                    var stph = this.objs.utilityobj.standardizePhone(phone);
+                                    if (stph!=="NotOK") {
+
+                                        this.db.Partials.insert({
+                                            FromPhone:p.PhoneNumber,
+                                            PartialID: this.objs.uuidv4(),
+                                            PhoneNumber:stph,
+                                            EmailAddress: "",
+                                            Message: "You have been uninvited from "+e.EventName+" by "+e.CreatorName+". The event may have been cancelled. Sorry :(",
+                                            Subject: null
+                                        })
+                                    }
+
+                                    return "OK";
+                                })
+                            }
+                        })
+                    })
+
+                })
+              
+            }
+        })
+    }
+
+    async rescheduleEvent(eventid,startdate,enddate,location,address,city,state,postalcode,flow) {
         return await this.db.EventSchedules.findOne({
             EventID: eventid,
             Status: 0
@@ -734,6 +862,10 @@ class events {
 
                     if (startdate===null) {
                         startdate=es.StartDate;
+                    }
+
+                    if (enddate===null) {
+                        enddate=es.EndDate;
                     }
 
                     if (location===null) {
@@ -761,6 +893,7 @@ class events {
                         EventID: eventid,
                         IterationNum:es.IterationNum+1,
                         StartDate: startdate,
+                        EndDate: enddate,
                         EventLength: es.EventLength,
                         Status: 0,
                         Location: location,
@@ -779,8 +912,7 @@ class events {
                                     EventScheduleID: e.EventScheduleID,
                                     Acceptance: null,
                                     EventGuestID: esg[x].EventGuestID,
-                                    PhoneID: esg[x].PhoneID,
-                                    SpecialSend: 0
+                                    PhoneID: esg[x].PhoneID
                                 })
                             }
 
@@ -790,23 +922,21 @@ class events {
                                 var areq=1;
 
                                 if (flow===0) {
-                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event/activity "+ev.EventName+" has been rescheduled");
+                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event "+ev.EventName+" has been rescheduled");
                                 }
                                 if (flow===1 && ev.MustApproveDiffLocation===true) {
                                     areq=5;
-                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event/activity "+ev.EventName+" has been rescheduled due to attendee location preferences. You must view/approve these changes: https://schd.us/app/index.html#/event?e="+ev.Hash);
+                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event "+ev.EventName+" has been rescheduled due to attendee location preferences. You must view/approve these changes: https://"+this.objs.envURL+"/event?e="+ev.Hash);
                                 }
                                 else if (flow===2 && ev.MustApproveDiffTime===true) {
                                     areq=6;
-                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event/activity "+ev.EventName+" has been rescheduled due to attendee time preferences. You must view/approve these changes: https://schd.us/app/index.html#/event?e="+ev.Hash);
+                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event "+ev.EventName+" has been rescheduled due to attendee time preferences. You must view/approve these changes: https://"+this.objs.envURL+"/event?e="+ev.Hash);
                                 }
-                                else if (ev.NotifyEventRescheduled===true) {
-                                    this.objs.messageobj.sendMessage(ev.CreatorPhone,"Your event/activity "+ev.EventName+" has been rescheduled due to attendee preferences. View here: https://schd.us/app/index.html#/event?e="+ev.Hash);
-                                }
-
+                               
                                 return this.db.Events.update({
                                     EventID: eventid
                                 },{
+                                    EventDate: startdate,
                                     ActionReq:areq,
                                     Reschedule:true
                                 }).then(pox=>{
@@ -827,13 +957,15 @@ class events {
         })
     }
 
-    async scheduleEvent(eventid,params,phone,sdate,clientid) {
+    async scheduleEvent(eventid,params,phone,sdate,edate,clientid) {
+
         return await this.db.EventSchedules.insert({
             EventScheduleID: this.objs.uuidv4(),
             EventID: eventid,
             IterationNum:0,
             StartDate: sdate,
-            EventLength: params.EventLength,
+            EndDate: edate,
+            EventLength: params.EventLength==='i'?-1:params.EventLength,
             Status: 0,
             Location: params.Location,
             Address: params.EventStreet,
@@ -852,8 +984,7 @@ class events {
                                 Acceptance: null,
                                 EventScheduleGuestID: this.objs.uuidv4(),
                                 EventScheduleID: e.EventScheduleID,
-                                PhoneID: ph,
-                                SpecialSend: 0
+                                PhoneID: ph
                             })
                         })
                     }
@@ -874,8 +1005,7 @@ class events {
                                 Acceptance: true,
                                 EventScheduleGuestID: this.objs.uuidv4(),
                                 EventScheduleID: e.EventScheduleID,
-                                PhoneID: ph,
-                                SpecialSend: 0
+                                PhoneID: ph
                             })
                         })
                     }
@@ -888,6 +1018,11 @@ class events {
 
     async suggestNewLocation(eventid,evguestid,location,address,city,state,postalcode) {
         return await this.getEventById(eventid).then(e=> {
+
+            if (e.AllowLocationChange!==true) {
+                return "Location change not allowed";
+            }
+
             return this.db.EventSuggestedLocations.find({
                 EventID: eventid
             }).then(allest=>{
@@ -948,7 +1083,7 @@ class events {
                             }
                         }
 
-                        return this.rescheduleEvent(eventid,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1).then(rse=> {
+                        return this.rescheduleEvent(eventid,null,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1).then(rse=> {
                             return "OK"
                         })
                     }
@@ -963,6 +1098,11 @@ class events {
 
     async suggestNewTime(eventid,evguestid,evtime) {
         return await this.getEventById(eventid).then(e=> {
+
+            if (e.AllowReschedule!==true) {
+                return "Reschedule not allowed";
+            }
+
             return this.db.EventSuggestedTimes.find({
                 EventID: eventid
             }).then(allest=>{
@@ -973,10 +1113,12 @@ class events {
                     }
                 }
 
+                var d=new Date(evtime).getTime()+(e.TimezoneOffset*60*1000);
+
                 return this.db.EventSuggestedTimes.insert({
                     EventSuggestedTimeID: this.objs.uuidv4(),
                     EventID: eventid,
-                    StartDate: evtime,
+                    StartDate: d,
                     EventGuestID: evguestid,
                     IterationNum: e.Schedules[0].IterationNum
                 }).then(est=>{
@@ -1017,7 +1159,7 @@ class events {
                             }
                         }
 
-                        return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,2).then(rse=> {
+                        return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,null,2).then(rse=> {
                             return "OK"
                         })
 
@@ -1030,7 +1172,7 @@ class events {
         });
     }
 
-    validateEvent(req,cli,sdate) {
+    validateEvent(req,cli,sdate,edate,optouts,emailoptouts) {
 
         try {
             if (req.body.ClientName.length<1 || req.body.ClientName.length>128) {
@@ -1041,44 +1183,34 @@ class events {
                 return "Event name is invalid";
             }
 
-            if (req.body.Location.length<1 || req.body.Location.length>128) {
-                return "Location is invalid";
+            var addrr = this.verifyAddress(req);
+            if (addrr!=="OK") {
+                return addrr;
             }
-
-            if (req.body.EventStreet.length<1 || req.body.EventStreet.length>255) {
-                return "Address is invalid";
-            }
-
-            if (req.body.EventCity.length<1 || req.body.EventCity.length>64) {
-                return "City is invalid";
-            }
-
-            if (req.body.EventState!==null && req.body.EventState.length>0 && !this.objs.utilityobj.getUSStates().hasOwnProperty(req.body.EventState)) {
-                return "State is invalid";
-            }
-
+            
             if (req.body.EventDescription.length>1024) {
                 return "Event description is invalid";
             }
 
-            if (req.body.EventZip!==null && req.body.EventZip.length>0 && req.body.EventZip.length!==5 && req.body.EventZiplength!==10) {
-                return "Postal code is invalid";
-            }            
-
-            var vdate = new Date().getTime()+req.body.UTCOffset;
+            var vdate = new Date().getTime();
             var diff = sdate-vdate;
             var hours = Math.round(diff/(1000*60*60))
-            var length = parseInt(req.body.EventLength)/60;
-            if (hours<length) {
+            if (diff<0) {
                 return "Cannot schedule dates in the past";
             }
 
-            if (parseInt(req.body.ReminderTime)>hours) {
-                return "Cannot set a reminder time past the date of the event";
+            if (edate!==null && req.body.EventLength==='i') {
+                if (edate-sdate<0) {
+                    return "The end date cannot be before the start date";
+                }
             }
 
-            if (parseInt(req.body.ScheduleCutoffTime)>hours) {
-                return "Cannot set a cutoff time past the date of the event";
+            if (edate!=null && req.body.EventLength!=='i') {
+                return "Invalid operation";
+            }
+
+            if (req.body.ReminderTime==="yes" && hours<25) {
+                return "Cannot set a reminder time less than 25 hours before the event";
             }
 
             if (req.body.Guests.length===0) {
@@ -1100,70 +1232,122 @@ class events {
 
       
             for(var g=0; g<req.body.Guests.length; g++) {
+                for(var o=0; o<optouts.length; o++) {
+                    if (req.body.Guests[g].gphone===optouts[o].PhoneNumber) {
+                        return "Phone number "+req.body.Guests[g].gphone+" is on the opt-out list. Cannot invite this guest";
+                    }
+                }
+
+                for(var o=0; o<emailoptouts.length; o++) {
+                    if (req.body.Guests[g].gemail===emailoptouts[o].EmailAddress) {
+                        return "Email address "+req.body.Guests[g].gemail+" is on the opt-out list. Cannot invite this guest";
+                    }
+                }
+
                 var vg = this.verifyGuest(req.body.Guests[g]);
                 if (vg!=="OK") {
                     return vg;
                 }
             }
 
-            var glt = parseInt(req.body.GuestLimitTotal);
-
-            if (cli===null) {
-                if (req.body.EventIsRecurring===true) {
-                    return "Recurring event not allowed";
-                }
-                if (req.body.Guests.length>8) {
-                    return "Up to 8 guests allowed when not logged in"
-                }
-                if (glt>8) {
-                    return "Maximum guest total cannot be greater than 8"
-                }
+            if (cli.EventCnt===3 && cli.IsPro!==true && cli.IsPremium!==true) {
+                return "Non-premium accounts are allowed up to 3 events per month";
             }
-            else {
-                if (req.body.EventIsRecurring===true && c.IsPremium!==true) {
-                    return "Recurring event not allowed";
-                }
-                if (req.body.Guests.length>50 && cli.IsPro!==true) {
-                    return "Non-pro accounts are allowed up to 50 guests";
-                }
-                if (glt>50) {
-                    return "Maximum guest total cannot be greater than 50";
+            if (req.body.EventIsRecurring===true && cli.IsPremium!==true) {
+                return "Recurring event not allowed";
+            }
+            if (req.body.Guests.length>50 && cli.IsPro!==true && cli.IsPremium===true) {
+                return "Non-pro accounts are allowed up to 50 attendees";
+            } 
+            if (req.body.Guests.length>15 && cli.IsPro!==true && cli.IsPremium!==true) {
+                return "No-premium accounts are allowed up to 15 attendees";
+            }
+
+            if (cli.IsPro!==true && cli.IsPremium!==true) {
+                if (req.body.GuestsReschedule===true || req.body.GuestsChangeLocation===true) {
+                    return "Reschedule and change location are not allowed for free accounts";
                 }
             }
 
-
-            if (req.body.UTCOffset===null) {
-                return "Invalid UTC Offset";
-            }
         }
         catch(e) {
+            console.log(e);
             return "An unspecified error occurred";
         }
 
         return "OK";
     }
 
+    verifyAddress(req) {
+        if (req.body.Location.length<1 || req.body.Location.length>128) {
+            return "Location is invalid";
+        }
+
+        if (req.body.EventStreet.length<1 || req.body.EventStreet.length>255) {
+            return "Address is invalid";
+        }
+
+        if (req.body.EventCity.length<1 || req.body.EventCity.length>64) {
+            return "City is invalid";
+        }
+
+        if (req.body.EventState!==null && req.body.EventState.length>0 && !this.objs.utilityobj.getUSStates().hasOwnProperty(req.body.EventState)) {
+            return "State is invalid";
+        }       
+
+        if (req.body.EventZip!==null && req.body.EventZip.length>0 && req.body.EventZip.length!==5 && req.body.EventZip.length!==10) {
+            return "Postal code is invalid";
+        }   
+
+        return "OK"
+    }
+
     verifyGuest(guest) {
         if (guest.gname.length<1 || guest.gname.length>128) {
             return "Invalid guest name";
         }
-        if (guest.gphone!=="Not Specified" && guest.gphone!==null) {
+        if (guest.gphone!=null && guest.gphone.length>0 && guest.gphone!=="Not Specified" && guest.gphone!==null) {
             var vp = this.objs.utilityobj.verifyPhone(guest.gphone);
             if (vp!=="OK") {
                 return vp;
             }
         }
-        if (guest.gemail!=="Not Specified" && guest.gemail!==null) {
+        if (guest.gemail!=null && guest.gemail.length>0 && guest.gemail!=="Not Specified" && guest.gemail!==null) {
             var ve = this.objs.utilityobj.verifyEmail(guest.gemail);
             if (ve!=="OK") {
                 return ve;
             }
         }
+        if ((guest.gemail===null||guest.gemail.length===0||guest.gemail==="Not Specified")&&(guest.gphone===null||guest.gphone.length===0||guest.gphone==="Not Specified")) {
+            return "A guest does not have an email address or phone number"
+        }
+
         return "OK";
     }
 
+    async verifyOwner(eventid) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c!==null) {
+                return this.db.Events.findOne({
+                    EventID: eventid,
+                    CreatorID: c
+                }).then(e=>{
+                    if (e!==null) {
+                        return e; 
+                    }
+                    else {
+                        return null;
+                    }
+                })
+            }
+            else {
+                return null;
+            }
+        });
+    }
+
     verifyPhone(eid,hash,phone) {
-        this.objs.messageobj.sendMessage(phone, "Schedule Us - Verify phone number to set up event/activity: https://"+this.objs.envURL+"/#/verifyphone?e="+eid+"&h="+hash);
+        this.objs.messageobj.sendMessage(phone, "Schedule Us - Verify phone number to set up event: https://"+this.objs.envURL+"/verifyphone?e="+eid+"&h="+hash);
     }
 
     async verifyPhoneConfirm(eid,hash) {
@@ -1183,7 +1367,7 @@ class events {
                         PhoneNumber: e.CreatorPhone
                     }).then(eg=> {
 
-                        this.objs.messageobj.sendMessage(e.CreatorPhone, "Schedule Us - Event/Activity set up. Access here: https://"+this.objs.envURL+"/#/event?e="+hash+"&g="+eg.EventGuestID);
+                        this.objs.messageobj.sendMessage(e.CreatorPhone, "Schedule Us - Event/Activity set up. Access here: https://"+this.objs.envURL+"/event?e="+hash+"&g="+eg.EventGuestID);
 
                         return "OK";
                     });

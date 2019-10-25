@@ -23,6 +23,37 @@ class utilities {
         return tree;
     }
 
+    getDateFromTimestamp(t) {
+        var d = new Date(parseInt(t));
+        return d.getMonth()+"/"+d.getDate()+"/"+d.getFullYear();
+    }
+
+    getTimeFromTimestamp(t) {
+        var d = new Date(parseInt(t));
+        var h = d.getHours();
+        var a = "";
+        if (h===0) {
+            h=12;
+            a="AM";
+        }
+        else {
+            if (h>12) {
+                h=h-12;
+                a="PM";
+            }
+            else {
+                a="AM";
+            }
+        }
+        var m = d.getMinutes();
+        if (m<10) {
+            m="0"+m;
+        }
+
+        return h+":"+m+" "+a;
+        
+    }
+
     getUSStates() {
         return {
             "AL": "Alabama",

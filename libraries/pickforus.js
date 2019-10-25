@@ -182,54 +182,73 @@ class pickforus {
         
     }
 
-    doPickForUs(params) {
+    async doPickForUs(params) {
 
-        this.userTime = this.getDateFromOffset(params.Offset);
-        this.calendars = this.getCalendars(params.Users, params.Offset);
-        
-        // This array will contain the available days to choose from
-        this.days=[];
+        return await this.objs.sessionobj.verify().then(c=> {
+            return this.objs.clientobj.getClientByID(c).then(cli=> {
 
-        // This array will include the preferred date times
-        this.preferredtimes=[];
+                if (cli===null) {
+                    return "You must be logged in to use Pick for Us";
+                }
 
-        // Determine all days from date ranges
-        if (params.RequireToday===true) {
-            this.days.push({d: 0, t:[]});
-        }
-        if (params.LSoon===true) {
-            this.pushDays(1,3);
-        }
-        if (params.LWeek===true) {
-            this.pushDays(4,7);
-        }
-        if (params.LMonth===true) {
-            this.pushDays(8,30);
-        }
-        if (params.LMonthPlus===true) {
-            this.pushDays(31,90);
-        }
+                if (cli.PFUSusage>=15) {
+                    return "You have reached the maximum number of times you may use Pick for Us today. Please try again tomorrow.";
+                }
 
-        // Now limit days by days of week
-        this.limitDays(params);
+                return this.db.Clients.update({
+                    ClientID: cli.ClientID
+                },{
+                    PFUSusage: cli.PFUSusage+1
+                }).then(c=>{
+   
+                    this.userTime = this.getDateFromOffset(params.Offset);
+                    this.calendars = this.getCalendars(params.Users, params.Offset);
+                    
+                    // This array will contain the available days to choose from
+                    this.days=[];
 
-        // Create available date-time region pairs
-        if (this.createDateTimes(params))
-        {
-            // Create preferred times if possible
-            this.buildPreferredTimes(params);
+                    // This array will include the preferred date times
+                    this.preferredtimes=[];
 
-            if (this.preferredtimes.length>0) {
-                return this.buildDateString(this.findFinalDate(true));
-            }
-            else {
-                return this.buildDateString(this.findFinalDate(false));
-            }
-        }
-        else {
-            return null;
-        }
+                    // Determine all days from date ranges
+                    if (params.RequireToday===true) {
+                        this.days.push({d: 0, t:[]});
+                    }
+                    if (params.LSoon===true) {
+                        this.pushDays(1,3);
+                    }
+                    if (params.LWeek===true) {
+                        this.pushDays(4,7);
+                    }
+                    if (params.LMonth===true) {
+                        this.pushDays(8,30);
+                    }
+                    if (params.LMonthPlus===true) {
+                        this.pushDays(31,90);
+                    }
 
+                    // Now limit days by days of week
+                    this.limitDays(params);
+
+                    // Create available date-time region pairs
+                    if (this.createDateTimes(params))
+                    {
+                        // Create preferred times if possible
+                        this.buildPreferredTimes(params);
+
+                        if (this.preferredtimes.length>0) {
+                            return this.buildDateString(this.findFinalDate(true));
+                        }
+                        else {
+                            return this.buildDateString(this.findFinalDate(false));
+                        }
+                    }
+                    else {
+                        return null;
+                    }
+                });
+            });
+        });
     }
 
     findFinalDate(usePreferred) {
