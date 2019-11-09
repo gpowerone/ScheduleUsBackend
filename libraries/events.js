@@ -118,15 +118,15 @@ class events {
     async addGuest(eventID, guest, isOrg, clientID) {
 
         if (guest.gemail!==null && guest.gemail.length>0 && guest.gemail!=="Not Specified" && this.objs.utilityobj.verifyEmail(guest.gemail)!=="OK") {
-            return new Promise(null);
+            return new Promise(function (resolve, reject) { resolve(null); });
         }
 
         if (guest.gphone!==null && guest.gphone.length>0 && guest.gphone!=="Not Specified" && this.objs.utilityobj.verifyPhone(guest.gphone)!=="OK") {
-            return new Promise(null);
+            return new Promise(function (resolve, reject) { resolve(null); });
         }
 
         if (((guest.gemail===null||guest.gemail.length===0) && (guest.gphone===null||guest.gphone.length===0)) || (guest.gemail==="Not Specified" && guest.gphone==="Not Specified")) {
-            return new Promise(null);
+            return new Promise(function (resolve, reject) { resolve(null); });
         }
 
         var phone = this.objs.utilityobj.standardizePhone(guest.gphone);
@@ -134,18 +134,68 @@ class events {
             phone=null;
         }
 
-        return await this.db.EventGuests.insert({
-            EventID: eventID,
-            EventGuestID: this.objs.uuidv4(),
-            EmailAddress: guest.gemail,
-            PhoneNumber: phone,
-            GuestName: guest.gname,
-            IsRequired: guest.greq,
-            IsOrganizer: isOrg,
-            ClientID: clientID
-        }).then(r=> {
-            return r;
-        })
+        if (clientID===null) {
+            return await this.db.Clients.findOne({
+                or: [
+                    {PhoneNumber: phone},
+                    {EmailAddress: guest.gemail}] 
+            }).then(cl=>{
+                var clid=null;
+                var fl=0;
+                if (cl!==null) {
+                    clid=cl.ClientID;
+                    if (cl.IsPro) {
+                        fl=2;
+                    }
+                    if (cl.IsPremium) {
+                        fl=1;
+                    }
+                }
+
+                return this.db.EventGuests.insert({
+                    EventID: eventID,
+                    EventGuestID: this.objs.uuidv4(),
+                    EmailAddress: guest.gemail,
+                    PhoneNumber: phone,
+                    GuestName: guest.gname,
+                    IsRequired: guest.greq,
+                    IsOrganizer: isOrg,
+                    ClientID: clid,
+                    Flair: fl
+                }).then(r=> {
+                    return r;
+                })
+            })
+        }
+        else {
+
+            return await this.db.Clients.findOne({
+                ClientID: clientID
+            }).then(cl=>{
+
+                var fl=0;
+                if (cl.IsPro) {
+                    fl=2;
+                }
+                if (cl.IsPremium) {
+                    fl=1;
+                }
+
+                return this.db.EventGuests.insert({
+                    EventID: eventID,
+                    EventGuestID: this.objs.uuidv4(),
+                    EmailAddress: guest.gemail,
+                    PhoneNumber: phone,
+                    GuestName: guest.gname,
+                    IsRequired: guest.greq,
+                    IsOrganizer: isOrg,
+                    ClientID: clientID,
+                    Flair: fl
+                }).then(r=> {
+                    return r;
+                })
+            });
+        }
         
     }
 
@@ -163,13 +213,20 @@ class events {
 
                 var esobj = eventobj.Schedules[0];
 
+                var addr="("+esobj.Address+" "+esobj.City+", "+esobj.State+" "+esobj.PostalCode+")";
+                if (esobj.Address.length===0 && esobj.City.length===0 && esobj.State.length===0 && esobj.PostalCode.length===0) {
+                    addr=""; 
+                }
+
+
                 return this.db.PhoneNumbers.findOne({
                     PhoneID: ph
                 }).then(p=> {
 
+                    
                     if (egobj.EmailAddress===null || egobj.EmailAddress.length===0 || egobj.EmailAddress==="Not Specified") {
                         var msg= eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
-                        esobj.Location+" ("+esobj.Address+" "+esobj.City+", "+esobj.State+" "+esobj.PostalCode+") on "+
+                        esobj.Location+" "+addr+"on "+
                         this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate);
 
 
@@ -185,7 +242,7 @@ class events {
                     else {
                         var msg="<h3> Dear "+egobj.GuestName+",</h3>"+
                         "<p>"+eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
-                        esobj.Location+" ("+esobj.Address+" "+esobj.City+", "+esobj.State+" "+esobj.PostalCode+") on "+
+                        esobj.Location+" "+addr+" on "+
                         this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+"</p>";
 
                         this.db.Partials.insert({
@@ -251,6 +308,13 @@ class events {
         
                         var edate = null; 
                         var sdate = new Date(req.body.EventDate).getTime()+(parseInt(req.body.UTCOffset)*60*1000);
+                        var del=0;
+                        if (cli.IsPro) {
+                            del=2;
+                        }
+                        if (cli.IsPremium) {
+                            del=1;
+                        }
 
                         if (req.body.EndDate!==null) {
                             edate = new Date(req.body.EndDate).getTime()+(parseInt(req.body.UTCOffset)*60*1000);
@@ -285,7 +349,8 @@ class events {
                                 MustApproveDiffLocation: req.body.MustApproveDiffLocation,
                                 MustApproveDiffTime: req.body.MustApproveDiffTime,
                                 EventDate: sdate,
-                                EndDate: edate
+                                EndDate: edate,
+                                Deletable: del
                             }).then(r=> {
                                 if (r!==null && typeof(r.EventID)!==undefined) {
                             
@@ -374,6 +439,37 @@ class events {
         });
     }
 
+    async doLocationDetails(req,res) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            return this.objs.clientobj.getClientByID(c).then(cli=> {
+
+                if (cli===null) {
+                    return "You must be logged in to use the location finder";
+                }
+
+                if (cli.LFinderUsage>=50) {
+                    return "You have used the location finder the maximum number of times today. Please try again tomorrow";
+                }
+
+                return this.db.Clients.update({
+                    ClientID: cli.ClientID
+                },{
+                    LFinderUsage: cli.LFinderUsage+1
+                }).then(i=>{
+                    this.objs.googleplaces.placeDetailsRequest({reference: req.body.ref}, function (error, response) {
+                        if (error) { 
+                            res.send({status: 500, message: "An unexpected error occurred"})
+                        }
+                        else {
+                            res.send({status: 200, message:JSON.stringify(response)});
+                        }
+                    });
+                })
+
+            })
+        })
+    }
+
     async doLocationFinder(req,res) {
         return await this.objs.sessionobj.verify().then(c=> {
             return this.objs.clientobj.getClientByID(c).then(cli=> {
@@ -382,7 +478,7 @@ class events {
                     return "You must be logged in to use the location finder";
                 }
 
-                if (cli.LFinderUsage>=15) {
+                if (cli.LFinderUsage>=50) {
                     return "You have used the location finder the maximum number of times today. Please try again tomorrow";
                 }
 
@@ -394,9 +490,10 @@ class events {
 
                     if (req.body.PickLocation===true) {
             
+                        var self=this;
                         this.objs.geocoder.find(req.body.Geocode, function(err,r) {
             
-                            this.objs.eventsobj.locationFinder(req.body.Place, [r[0].location.lat,r[0].location.lng], req.body.Keyword, function(error,response) {
+                            self.objs.eventsobj.locationFinder(req.body.Place, [r[0].location.lat,r[0].location.lng], req.body.Keyword, function(error,response) {
                                 response.foundCoords=[r[0].location.lat,r[0].location.lng];
                                 res.send({ status: 200, message:JSON.stringify(response) })
                             });
@@ -480,16 +577,16 @@ class events {
 
     async getEventByHash(hsh, me, imic) {
         return await this.db.Events.findOne({ 
-            Hash: hsh,
-            "ActionReq >": 0
+            Hash: hsh
         }).then(r=> {
             if (r!==null) {
-                if (r.EventDate<new Date().getTime()-(1000*60*60*24)) {
-                    return null;
-                }
-
+   
                 return this.db.EventGuests.find({
                     EventID: r.EventID
+                }, {
+                    order: [
+                        {field: "GuestName", direction: "asc"}
+                    ]
                 }).then(eg=> {
                    
 
@@ -499,17 +596,20 @@ class events {
                     }).then(es=> {
                         r.Schedules=[];
                         r.Schedules.push(es[0]);
-                        
+                    
+
                         return this.db.EventScheduleGuests.find({
                             EventScheduleID: es[0].EventScheduleID
                         }).then(esg=> {
-
-                         
                             r.Guests=[];
                             r.EGID=null;
                             r.IsOwner=false;
                             r.NeedsAcceptance=null;
                             r.Acceptance=null;
+
+                            if (r.CreatorID===me) {
+                                r.IsOwner=true;
+                            }
 
                             for(var g=0; g<eg.length; g++) {
 
@@ -529,9 +629,7 @@ class events {
                                         r.NeedsAcceptance=(accpt===null)?true:false;
                                         r.Acceptance=accpt;
                                         egid=r.EGID;
-                                        if (r.CreatorID===me) {
-                                            r.IsOwner=true;
-                                        }
+                                       
                                     }
                                 }
                                 else {
@@ -540,9 +638,7 @@ class events {
                                         r.NeedsAcceptance=(accpt===null)?true:false;
                                         r.Acceptance=accpt;
                                         egid=r.EGID;
-                                        if (r.CreatorPhone==eg[g].PhoneNumber) {
-                                            r.IsOwner=true;
-                                        }
+                                       
                                     }
                                 }
                                             
@@ -555,7 +651,9 @@ class events {
                                     r.Guests.push({
                                         GuestName: eg[g].GuestName,
                                         Acceptance: accpt,
-                                        EventGuestID: egid
+                                        EventGuestID: egid,
+                                        ClientID: eg[g].ClientID,
+                                        Flair: eg[g].Flair
                                     });
                                 }
                             }
@@ -579,43 +677,54 @@ class events {
                                     return null;
                                 }
                             }
-
-                            return this.db.EventComments.find({
-                                EventID: r.EventID
-                            },{
-                                order: [
-                                    {field: "CreationDate", direction: "desc"}
-                                ]
-                            }).then(ec=> {
-                                r.Comments=[];
-                                if (ec!=null && ec.length>0) {
-                                    r.Comments = this.objs.utilityobj.createTree(ec,"00000000-0000-0000-0000-000000000000",0);
-                                }
-                                return this.db.EventSuggestedTimes.find({
-                                    EventID: r.EventID,
-                                    IterationNum: es[0].IterationNum
-                                }).then(est=>{
-                                    return this.db.EventSuggestedLocations.find({
-                                        EventID: r.EventID,
-                                        IterationNum: es[0].IterationNum
-                                    }).then(esl=>{
-                                        r.CreatorID=null;
-                                        r.CreatorPhone=null;
-                                        r.SuggestedTimesCount=est.length;
-                                        r.SuggestedLocationsCount=esl.length;
-                                        return r;
-                                    })
-                                })
-
-                                
-                            }) 
-                        });
-                    }) 
-                })              
+                 
+                            r.CreatorID=null;
+                            r.CreatorPhone=null;
+                        
+                            return r;
+                        
+                        }) 
+                    });
+                }) 
+                           
             }
             else {
                 return null;
             }
+        });
+    }
+
+    async getComments(id) {
+        return await this.db.EventComments.find({
+            EventID: id
+        },{
+            order: [
+                {field: "CreationDate", direction: "desc"}
+            ]
+        }).then(ec=> {
+            var Comments=[];
+            if (ec!=null && ec.length>0) {
+                Comments = this.objs.utilityobj.createTree(ec,"00000000-0000-0000-0000-000000000000",0);
+            }
+            return Comments;
+        });
+    }
+
+    async getSuggestedLocations(id,itn) {
+        return this.db.EventSuggestedLocations.find({
+            EventID: id,
+            IterationNum: itn
+        }).then(est=>{
+            return est;
+        });
+    }
+
+    async getSuggestedTimes(id,itn) {
+        return this.db.EventSuggestedTimes.find({
+            EventID: id,
+            IterationNum: itn
+        }).then(est=>{
+            return est;
         });
     }
 
@@ -664,9 +773,14 @@ class events {
                     }
 
                     var host= [];
+                    var archived=[];
+
                     for(var n=0; n<hosting.length; n++) {
-                        if (hosting[n].EventDate>new Date().getTime()-(1000*60*60*24)) {
-                            host.push(hosting[n]);
+                        if (new Date().getTime()-(1000*60*60*8)<hosting[n].EventDate) {
+                            host.push(hosting[n]);                     
+                        }
+                        else {
+                            archived.push(hosting[n]);
                         }
                     }
 
@@ -693,14 +807,16 @@ class events {
 
                                 return {
                                     h: host,
-                                    p: part
+                                    p: part,
+                                    a: archived
                                 }
                             });   
                          }
                          else {
                             return {
                                 h: host,
-                                p: []
+                                p: [],
+                                a: archived
                             }
                          }                   
                     })
@@ -844,6 +960,21 @@ class events {
                 })
               
             }
+        })
+    }
+
+    async reportComment(eventcommentid) {
+        return await this.db.EventComments.findOne({
+            EventCommentID: eventcommentid
+        }).then(r=>{
+            if (r!==null) {
+                var msg="Event: "+r.EventID+"<br /><br />";
+                msg+="CommentID: "+r.EventCommentID+"<br /><br />";
+                msg+="Comment: "+r.Comment;
+
+                this.objs.messageobj.sendEmail("admin@schd.us","Comment Reported",msg);
+            }
+            return "OK";
         })
     }
 
@@ -992,6 +1123,7 @@ class events {
             }
 
             if (params.WillAttend===true) {
+
                 this.addGuest(eventid, {
                     gname: params.YourName,
                     gemail: null,
@@ -1253,15 +1385,21 @@ class events {
             if (cli.EventCnt===3 && cli.IsPro!==true && cli.IsPremium!==true) {
                 return "Non-premium accounts are allowed up to 3 events per month";
             }
-            if (req.body.EventIsRecurring===true && cli.IsPremium!==true) {
-                return "Recurring event not allowed";
-            }
+   
             if (req.body.Guests.length>50 && cli.IsPro!==true && cli.IsPremium===true) {
                 return "Non-pro accounts are allowed up to 50 attendees";
             } 
             if (req.body.Guests.length>15 && cli.IsPro!==true && cli.IsPremium!==true) {
-                return "No-premium accounts are allowed up to 15 attendees";
+                return "Non-premium accounts are allowed up to 15 attendees";
             }
+
+            if (req.body.GuestLimitTotal>50 && cli.IsPro!==true && cli.IsPremium===true) {
+                return "Non-pro accounts are allowed up to 50 attendees";
+            } 
+            if (req.body.GuestLimitTotal>15 && cli.IsPro!==true && cli.IsPremium!==true) {
+                return "Non-premium accounts are allowed up to 15 attendees";
+            }
+
 
             if (cli.IsPro!==true && cli.IsPremium!==true) {
                 if (req.body.GuestsReschedule===true || req.body.GuestsChangeLocation===true) {
@@ -1283,11 +1421,11 @@ class events {
             return "Location is invalid";
         }
 
-        if (req.body.EventStreet.length<1 || req.body.EventStreet.length>255) {
+        if (req.body.EventStreet.length>255) {
             return "Address is invalid";
         }
 
-        if (req.body.EventCity.length<1 || req.body.EventCity.length>64) {
+        if (req.body.EventCity.length>64) {
             return "City is invalid";
         }
 
@@ -1304,22 +1442,22 @@ class events {
 
     verifyGuest(guest) {
         if (guest.gname.length<1 || guest.gname.length>128) {
-            return "Invalid guest name";
+            return "Invalid attendee name";
         }
         if (guest.gphone!=null && guest.gphone.length>0 && guest.gphone!=="Not Specified" && guest.gphone!==null) {
             var vp = this.objs.utilityobj.verifyPhone(guest.gphone);
             if (vp!=="OK") {
-                return vp;
+                return "An attendee has an invalid phone number"
             }
         }
         if (guest.gemail!=null && guest.gemail.length>0 && guest.gemail!=="Not Specified" && guest.gemail!==null) {
             var ve = this.objs.utilityobj.verifyEmail(guest.gemail);
             if (ve!=="OK") {
-                return ve;
+                return "An attendee has an invalid email address";
             }
         }
         if ((guest.gemail===null||guest.gemail.length===0||guest.gemail==="Not Specified")&&(guest.gphone===null||guest.gphone.length===0||guest.gphone==="Not Specified")) {
-            return "A guest does not have an email address or phone number"
+            return "An attendee does not have an email address or phone number"
         }
 
         return "OK";
@@ -1345,40 +1483,7 @@ class events {
             }
         });
     }
-
-    verifyPhone(eid,hash,phone) {
-        this.objs.messageobj.sendMessage(phone, "Schedule Us - Verify phone number to set up event: https://"+this.objs.envURL+"/verifyphone?e="+eid+"&h="+hash);
-    }
-
-    async verifyPhoneConfirm(eid,hash) {
-        return await this.db.Events.findOne({
-            EventID: eid,
-            Hash: hash,
-            ActionReq: 0
-        }).then(e=>{
-            if (e!==null) {
-                this.db.Events.update({
-                    EventID: eid
-                },{
-                    ActionReq: 1
-                }).then(r=>{
-                    this.db.EventGuests.findOne({
-                        EventID: eid,
-                        PhoneNumber: e.CreatorPhone
-                    }).then(eg=> {
-
-                        this.objs.messageobj.sendMessage(e.CreatorPhone, "Schedule Us - Event/Activity set up. Access here: https://"+this.objs.envURL+"/event?e="+hash+"&g="+eg.EventGuestID);
-
-                        return "OK";
-                    });
-                })                
-            }
-            else {
-                return "Fail";
-            }
-        })
-    }
-
+    
     _setObjs(_objs) {
         this.objs=_objs;
     }

@@ -1,13 +1,27 @@
 class pickforus {
 
+
+    // Builds ranges for calendar dates
+    buildCalendarDates(calendarDateTimes) {
+        var calendarDates=[];
+
+        for (var z=0; z<calendarDateTimes.length; z++) {
+            for (var q=0; q<calendarDateTimes[z].length; q++) {
+                calendarDates.push([new Date(calendarDateTimes[z][q][0]), new Date(calendarDateTimes[z][q][1])])
+            }
+        }
+
+        return calendarDates;
+    }
+
     // Build date times for day segments
-    buildDateTimeSegments(day, evlength, tarr, startHour, finishHour) {
+    buildDateTimeSegments(day, tarr, startHour, finishHour) {
         var hasResult=false;
 
         if (startHour===-1) {
             for(var hour=21; hour<=23; hour++) {
                 for(var minute=0; minute<=45; minute+=15) {
-                    if (this.todayCheck(day,hour,minute) && this.calendarize(evlength,day,hour,minute)) {
+                    if (this.todayCheck(day,hour,minute) && this.calendarize(day,hour,minute)) {
                         tarr.push([hour,minute]);
                         hasResult=true;
                     }
@@ -15,7 +29,7 @@ class pickforus {
             }
             for(var hour=0; hour<=6; hour++) {
                 for(var minute=0; minute<=45; minute+=15) {
-                    if (this.todayCheck(day,hour,minute) && this.calendarize(evlength,day,hour,minute)) {
+                    if (this.todayCheck(day,hour,minute) && this.calendarize(day,hour,minute)) {
                         tarr.push([hour,minute]);
                         hasResult=true;
                     }
@@ -26,7 +40,7 @@ class pickforus {
 
             for(var hour=startHour; hour<=finishHour; hour++) {
                 for(var minute=0; minute<=45; minute+=15) {
-                    if (this.todayCheck(day,hour,minute) && this.calendarize(evlength,day,hour,minute)) {
+                    if (this.todayCheck(day,hour,minute) && this.calendarize(day,hour,minute)) {
                         tarr.push([hour,minute]);
                         hasResult=true;
                     }
@@ -126,7 +140,27 @@ class pickforus {
     }
 
     // Returns true if there are no calendar conflicts for the given date time
-    calendarize(day,hour,minute,ap) {
+    calendarize(day,hour,minute) {
+
+        var od = new Date();
+        var mth = od.getMonth()+1;
+        var dy = od.getDate();
+        if (mth<10) {
+            mth="0"+mth;
+        }
+        if (dy<10) {
+            dy="0"+dy;
+        }
+
+        var d = new Date(od.getFullYear()+"-"+mth+"-"+dy+"T00:00:00");
+        var ts = d.getTime()+(day*86400000)+(hour*3600000)+(minute*60000);
+
+        for(var ci=0; ci<this.calendars.length; ci++) {
+            if (this.calendars[ci][1].getTime()>ts && ts>=this.calendars[ci][0].getTime()) {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -150,21 +184,21 @@ class pickforus {
             // Hour rotation
             // Consider morning times
             if (params.Mornings===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,evlength,this.days[day].t,7,11)) {
+                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,7,11)) {
                     hasTime=true;
                 }
             }
 
             // Consider afternoon times
             if (params.Afternoons===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,evlength,this.days[day].t,12,16)) {
+                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,12,16)) {
                     hasTime=true;
                 }               
             }
 
             // Consider evening times
             if (params.Evenings===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,evlength,this.days[day].t,17,20)) {
+                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,17,20)) {
                     hasTime=true;
                 }
             }
@@ -202,50 +236,54 @@ class pickforus {
                 }).then(c=>{
    
                     this.userTime = this.getDateFromOffset(params.Offset);
-                    this.calendars = this.getCalendars(params.Users, params.Offset);
-                    
-                    // This array will contain the available days to choose from
-                    this.days=[];
+                    return this.getCalendars(params.Users, params.Offset).then(calendardata=>{
 
-                    // This array will include the preferred date times
-                    this.preferredtimes=[];
+                        this.calendars=this.buildCalendarDates(calendardata);
 
-                    // Determine all days from date ranges
-                    if (params.RequireToday===true) {
-                        this.days.push({d: 0, t:[]});
-                    }
-                    if (params.LSoon===true) {
-                        this.pushDays(1,3);
-                    }
-                    if (params.LWeek===true) {
-                        this.pushDays(4,7);
-                    }
-                    if (params.LMonth===true) {
-                        this.pushDays(8,30);
-                    }
-                    if (params.LMonthPlus===true) {
-                        this.pushDays(31,90);
-                    }
+                        // This array will contain the available days to choose from
+                        this.days=[];
 
-                    // Now limit days by days of week
-                    this.limitDays(params);
+                        // This array will include the preferred date times
+                        this.preferredtimes=[];
 
-                    // Create available date-time region pairs
-                    if (this.createDateTimes(params))
-                    {
-                        // Create preferred times if possible
-                        this.buildPreferredTimes(params);
+                        // Determine all days from date ranges
+                        if (params.RequireToday===true) {
+                            this.days.push({d: 0, t:[]});
+                        }
+                        if (params.LSoon===true) {
+                            this.pushDays(1,3);
+                        }
+                        if (params.LWeek===true) {
+                            this.pushDays(4,7);
+                        }
+                        if (params.LMonth===true) {
+                            this.pushDays(8,30);
+                        }
+                        if (params.LMonthPlus===true) {
+                            this.pushDays(31,90);
+                        }
 
-                        if (this.preferredtimes.length>0) {
-                            return this.buildDateString(this.findFinalDate(true));
+                        // Now limit days by days of week
+                        this.limitDays(params);
+
+                        // Create available date-time region pairs
+                        if (this.createDateTimes(params))
+                        {
+                            // Create preferred times if possible
+                            this.buildPreferredTimes(params);
+
+                            if (this.preferredtimes.length>0) {
+                                return this.buildDateString(this.findFinalDate(true));
+                            }
+                            else {
+                                return this.buildDateString(this.findFinalDate(false));
+                            }
                         }
                         else {
-                            return this.buildDateString(this.findFinalDate(false));
+                            return null;
                         }
-                    }
-                    else {
-                        return null;
-                    }
+                    })
+                                  
                 });
             });
         });
@@ -321,9 +359,108 @@ class pickforus {
 
     }
 
+    // performs google calendar lookups
+    getGoogleCalendar(refreshToken) {
+
+        try {
+          
+            const oauth2Client = new this.objs.google.auth.OAuth2(
+                "801199894294-iei4roo6p67hitq9sc2tat5ft24qfakt.apps.googleusercontent.com", 
+                "WOihpgSDdZkA81FS8mF_RxmS", 
+                "https://localhost:8000/googcalendar" 
+            );
+            
+            oauth2Client.setCredentials({
+            refresh_token:
+                refreshToken
+            });
+            
+            const calendar = this.objs.google.calendar({version: 'v3', auth: oauth2Client});
+
+            return calendar.calendarList.list({}).then(res => {
+
+                for(var c=0; c<res.data.items.length; c++) {
+                    var cal = res.data.items[c];
+                    if (cal.id!=='en.usa#holiday@group.v.calendar.google.com' && cal.id!=='addressbook#contacts@group.v.calendar.google.com')
+                    {
+                        return calendar.events.list({
+                            'calendarId': cal.id,
+                            'timeMin': (new Date()).toISOString(),
+                            'showDeleted': false,
+                            'singleEvents': true,
+                            'orderBy': 'startTime'
+                        }).then(function(response) {
+                            var events = response.data.items;
+                            var calItems=[];
+                            for(var e=0; e<events.length; e++) {
+                                calItems.push([events[e].start.dateTime, events[e].end.dateTime]);
+                            }
+                            return calItems;
+                        });
+                    }
+                    else {
+                        return null;
+                    }
+                }
+            
+            })
+        }
+        catch(e) {
+            console.log(e);
+            return null;
+        }
+        
+    }
+
+    getCalendarRecur(calendarTokens, filledCalendars) {
+        return this.getGoogleCalendar(calendarTokens[0]).then(cr=>{
+            filledCalendars.push(cr);
+            calendarTokens.shift();
+
+            if (calendarTokens.length===0) {
+                return new Promise(function(resolve,reject) { 
+                    resolve(filledCalendars);
+                })
+            }
+            else {
+                return this.getCalendarRecur(calendarTokens, filledCalendars);                
+            }
+        });
+    }
+
     // will look up users and get calendars from sources
-    getCalendars(users) {
-        return [];
+    async getCalendars(users,offset) {
+        var ors = []; 
+        for(var x=0; x<users.length; x++) {
+            if (typeof(users[x].cid)!=="undefined") {
+                ors.push({ClientID: users[x].cid});
+            }
+        }
+
+        if (ors.length>0) {
+            return await this.db.ClientCalendar.find({
+                or: ors
+            }).then(res=>{
+
+                var filledCalendars=[];
+                var calendarTokens=[];
+
+                for(var r=0; r<res.length; r++) {
+                    if (res[r].CalendarType===0) {
+                       calendarTokens.push(res[r].CalendarToken);
+                    }
+                }
+                
+                return this.getCalendarRecur(calendarTokens, filledCalendars);
+
+            })
+        }
+        else {
+            return new Promise(function (resolve, reject) {
+                resolve(null);
+            });
+        }
+        
     }
 
     // Gets the users local time as we're going to return times relative to them

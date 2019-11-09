@@ -95,7 +95,7 @@ class client {
 
             return this.objs.jimp.read(ablob).then(image=>{
 
-                return image.resize(36,36).getBufferAsync(this.objs.jimp.MIME_PNG).then(rsimage=>{
+                return image.resize(150,150).getBufferAsync(this.objs.jimp.MIME_PNG).then(rsimage=>{
 
                     const s3 = new this.objs.aws.S3();
                     const params={
@@ -141,13 +141,18 @@ class client {
 
                 }).then((res)=>{
 
-                    return this.db.ClientCalendar.insert({
-                        ClientCalendarID: this.objs.uuidv4(),
+                    return this.db.ClientCalendar.destroy({
                         ClientID: c,
-                        CalendarType: cType,
-                        CalendarToken: res.data.refresh_token
-                    }).then(p=>{
-                        return "OK";
+                        CalendarType: cType
+                    }).then(cc=>{
+                        return this.db.ClientCalendar.insert({
+                            ClientCalendarID: this.objs.uuidv4(),
+                            ClientID: c,
+                            CalendarType: cType,
+                            CalendarToken: res.data.refresh_token
+                        }).then(p=>{
+                            return "OK";
+                        })
                     })
 
                 }).catch((error)=>{
@@ -176,32 +181,97 @@ class client {
                     
                     var tclient=clients[cn];
 
-                    this.db.Clients.find({
-                        or:[
-                            {PhoneNumber: clients[cn].PhoneNumber},
-                            {EmailAddress: clients[cn].EmailAddress}
-                        ]
-                    }).then(fc=>{
-                        var cl=null;
-                        if (fc!==null && fc.length>0) {
-                            cl=fc[0].ClientID;
-                        }
+                    var ph=this.objs.utilityobj.standardizePhone(tclient.PhoneNumber);
+                    if (ph!=="NotOK") {
 
-                        this.db.ClientGroupClients.insert({
-                            ClientGroupClientID: this.objs.uuidv4(),
-                            ClientGroupID: g.ClientGroupID,
-                            ClientID: cl,
-                            PhoneNumber: tclient.PhoneNumber,
-                            EmailAddress: tclient.EmailAddress,
-                            Name: tclient.Name
-                        });
-             
-                    })                
+                        this.db.Clients.find({
+                            or:[
+                                {PhoneNumber: ph},
+                                {EmailAddress: clients[cn].EmailAddress}
+                            ]
+                        }).then(fc=>{
+                            var cl=null;
+                            if (fc!==null && fc.length>0) {
+                                cl=fc[0].ClientID;
+                            }
+
+                            this.db.ClientGroupClients.insert({
+                                ClientGroupClientID: this.objs.uuidv4(),
+                                ClientGroupID: g.ClientGroupID,
+                                ClientID: cl,
+                                PhoneNumber: ph,
+                                EmailAddress: tclient.EmailAddress,
+                                Name: tclient.Name
+                            });
+                
+                        })          
+                    }      
                 }
 
                 return "OK";
             })
         })
+    }
+
+    async addToGoogleCalendar(name, addr, sdate, edate, desc) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c===null) {
+                return "Invalid Operation";
+            }
+
+            return this.db.ClientCalendar.findOne({
+                CalendarType: 0,
+                ClientID: c
+            }).then(cc=>{
+                if (cc!==null) {
+                    try {
+          
+                        const oauth2Client = new this.objs.google.auth.OAuth2(
+                            "801199894294-iei4roo6p67hitq9sc2tat5ft24qfakt.apps.googleusercontent.com", 
+                            "WOihpgSDdZkA81FS8mF_RxmS", 
+                            "https://localhost:8000/googcalendar" 
+                        );
+                        
+                        oauth2Client.setCredentials({
+                        refresh_token:
+                            cc.CalendarToken
+                        });
+                        
+                        const calendar = this.objs.google.calendar({version: 'v3', auth: oauth2Client});
+
+                        var event = {
+                            'summary':  name,
+                            'location': addr,
+                            'description': desc,
+                            'start': {
+                              'dateTime': sdate
+                            },
+                            'end': {
+                              'dateTime': edate
+                            },
+                            'reminders': {
+                              'useDefault': true                  
+                            }
+                        }
+
+                        return calendar.events.insert({
+                            auth: oauth2Client,
+                            calendarId: 'primary',
+                            resource: event,
+                        }).then(r=>{
+                            return "OK";
+                        });
+
+                    }
+                    catch(e) {
+
+                    }
+                }
+                else {
+                    return "Invalid Operation";
+                }
+            });
+        });
     }
 
     async addToGroup(clientgroupid, client) {
@@ -210,32 +280,59 @@ class client {
                 return "Invalid Operation";
             }
 
+            if (client.Name.length===0 || client.Name.length>128) {
+                return "Client name is invalid";
+            }
+
+            if (client.EmailAddress!==null && client.EmailAddress.length>0 && client.EmailAddress!=="Not Specified" && this.objs.utilityobj.verifyEmail(client.EmailAddress)!=="OK") {
+                return "Invalid Email Address";
+            }
+    
+            if (client.PhoneNumber!==null && client.PhoneNumber.length>0 && client.PhoneNumber!=="Not Specified" && this.objs.utilityobj.verifyPhone(client.PhoneNumber)!=="OK") {
+                return "Invalid Phone Number";
+            }
+    
+            if (((client.EmailAddress===null||client.EmailAddress.length===0) && (client.PhoneNumber===null||client.PhoneNumber.length===0)) || (client.EmailAddress==="Not Specified" && client.PhoneNumber==="Not Specified")) {
+                return "You must have a phone number or email address";
+            }
+
             return this.db.ClientGroups.findOne({
                 ClientGroupID: clientgroupid,
                 ClientID: c
             }).then(g=>{
                
-                this.db.Clients.find({
-                    or:[
-                        {PhoneNumber: client.PhoneNumber},
-                        {EmailAddress: client.EmailAddress}
-                    ]
-                }).then(fc=>{
-                    var cl=null;
-                    if (fc!==null && fc.length>0) {
-                        cl=fc[0].ClientID;
-                    }
+                var ph=this.objs.utilityobj.standardizePhone(client.PhoneNumber);
+                if (ph!=="NotOK") {
 
-                    this.db.ClientGroupClients.insert({
-                        ClientGroupClientID: this.objs.uuidv4(),
-                        ClientGroupID: g.ClientGroupID,
-                        ClientID: cl,
-                        PhoneNumber: client.PhoneNumber,
-                        EmailAddress: client.EmailAddress
-                    });
-            
-                })                
-            
+                    return this.db.Clients.find({
+                        or:[
+                            {PhoneNumber: ph},
+                            {EmailAddress: client.EmailAddress}
+                        ]
+                    }).then(fc=>{
+                        var cl=null;
+                        if (fc!==null && fc.length>0) {
+                            cl=fc[0].ClientID;
+                        }
+
+                            return this.db.ClientGroupClients.insert({
+                                ClientGroupClientID: this.objs.uuidv4(),
+                                ClientGroupID: g.ClientGroupID,
+                                ClientID: cl,
+                                PhoneNumber: ph,
+                                EmailAddress: client.EmailAddress,
+                                Name: client.Name
+                            }).then(q=>{
+                                return q.ClientGroupClientID;
+                            })
+                        
+                
+                    })                
+                
+                }
+                else {
+                    return "Failed to add"
+                }
 
             })
         })
@@ -385,6 +482,106 @@ class client {
         })
     }
 
+    doCheckout(customerID, planId, res, stripe) {
+        stripe.checkout.sessions.create({
+            customer: customerID,
+            payment_method_types: ["card"],
+            subscription_data: { items: [{ plan: planId }] },
+            success_url: "https://"+this.objs.envURL+'/purchase?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url: "https://"+this.objs.envURL+'/cancel'
+         }).then(session=>{
+              res.send({
+                status: 200,
+                sessionId: session.id
+              });
+         })       
+    }
+
+    async editGroupName(cgid,cgname) {
+        return await this.objs.sessionobj.verify().then(c=> {
+  
+            if (c===null) {
+                return "Invalid Credentials";
+            }
+
+            if (cgname.length===0 || cgname.length>128) {
+                return "Invalid group name";
+            }
+
+            return this.db.ClientGroups.findOne({
+                ClientGroupID: cgid,
+                ClientID: c
+            }).then(g=>{
+                if (g!==null) {
+                    return this.db.ClientGroups.update({
+                        ClientGroupID: cgid
+                    },{
+                        GroupName: cgname
+                    }).then(cg=>{
+                        return "OK";
+                    })
+                }
+                else {
+                    return "Invalid Credentials";
+                }
+            });
+        })
+    }
+
+    async editGroupMember(cgid,gname,gemail,gphone) {
+        return await this.objs.sessionobj.verify().then(c=> {
+
+            if (c===null) {
+                return "Invalid Credentials";
+            }
+
+            if (gname.length===0 || gname.length>128) {
+                return "Name is invalid";
+            }
+
+            if (gemail!==null && gemail.length>0 && gemail!=="Not Specified" && this.objs.utilityobj.verifyEmail(gemail)!=="OK") {
+                return "Invalid Email Address";
+            }
+    
+            if (gphone!==null && gphone.length>0 && gphone!=="Not Specified" && this.objs.utilityobj.verifyPhone(gphone)!=="OK") {
+                return "Invalid Phone Number";
+            }
+    
+            if (((gemail===null||gemail.length===0) && (gphone===null||gphone.length===0)) || (gemail==="Not Specified" && gphone==="Not Specified")) {
+                return "You must have a phone number or email address";
+            }
+
+            return this.db.ClientGroupClients.findOne({
+                ClientGroupClientID: cgid
+            }).then(cgi=>{
+                if (cgi!==null) {
+                    return this.db.ClientGroups.findOne({
+                        ClientGroupID: cgi.ClientGroupID,
+                        ClientID: c
+                    }).then(cg=>{
+                        if (cg!==null) {
+                            return this.db.ClientGroupClients.update({
+                                ClientGroupClientID: cgid
+                            },{
+                                PhoneNumber: gphone,
+                                EmailAddress: gemail,
+                                Name: gname
+                            }).then(r=>{
+                                return "OK";
+                            })
+                        }
+                        else {
+                            return "Invalid Operation";
+                        }
+                    })
+                }
+                else {
+                    return "Invalid Operation";
+                }
+            })
+        });
+    }
+
     async fillAddress(Street,City,State,Postal) {
         return await this.objs.sessionobj.verify().then(c=> {
   
@@ -530,6 +727,19 @@ class client {
         });
     }
 
+    async getClientCalendars() {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c===null) {
+                return "Invalid";
+            }
+            return this.db.ClientCalendar.find({
+                ClientID: c
+            }).then(cc=>{
+                return cc;
+            })
+        });
+    }
+
     async getClientsForGroup(clientgroupid) {
         return await this.objs.sessionobj.verify().then(c=> {
             return this.db.ClientGroups.findOne({
@@ -550,6 +760,16 @@ class client {
     async getGroupsForClient() {
         return await this.objs.sessionobj.verify().then(c=> {
             return this.db.ClientGroups.find({
+                ClientID: c
+            }).then(cgs=>{
+                return cgs; 
+            })
+        })
+    }
+
+    async getOrderHistoryForClient() {
+        return await this.objs.sessionobj.verify().then(c=> {
+            return this.db.ClientOrderHistory.find({
                 ClientID: c
             }).then(cgs=>{
                 return cgs; 

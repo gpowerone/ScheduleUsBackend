@@ -145,15 +145,15 @@ class utilities {
     }
 
     verifyEmail(emailaddress) {
-        var emailVerification = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+        var emailVerification = /^(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}$/;
         if (!emailVerification.test(emailaddress)) {
             return "Email address is invalid";
         }
         return "OK";
     }
 
-    verifyPhone(phone) {
-        var phoneVerification = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/im;
+    verifyPhone(phone) {    
+        var phoneVerification = /^1?-?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/im
         if (!phoneVerification.test(phone)) {
             return "Enter phone number with area code in format NNN-NNN-NNNN";
         }
