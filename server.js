@@ -16,14 +16,22 @@ const pickforuscls = require('./libraries/pickforus')
 const twilio = require('twilio')
 const awssdk = require('aws-sdk')
 const xss = require('xss')
+const axios = require('axios')
 const googleplaces = require("googleplaces");
 const GoogleGeocoder = require('google-geocoder');
+const jimp = require('jimp');
+const cfrontinvalidate = require('aws-cloudfront-invalidate')
+const {OAuth2Client} = require('google-auth-library');
+const {google} = require('googleapis');
 
 const dbConfig = config.get('ScheduleUs.dbConfig');
 const twConfig = config.get('ScheduleUs.twilio');
 const rcConfig = config.get('ScheduleUs.recaptcha');
 const evConfig = config.get('ScheduleUs.evConfig');
 const googConfig = config.get('ScheduleUs.googConfig');
+const stripeConfig = config.get('ScheduleUs.stripeConfig');
+
+const stripe = require("stripe")(stripeConfig.secret);
 
 awssdk.config.update({region: 'us-east-1'})
 
@@ -49,6 +57,13 @@ massive({
     uuidvalidate: uuidvalidate,
     envURL: evConfig.envURL,
     xss: xss,
+    axios: axios,
+    jimp: jimp,
+    cfrontinvalidate: cfrontinvalidate,
+    googauth: OAuth2Client,
+    google: google,
+    googcalcliid: googConfig.calClientID,
+    googcalsecret: googConfig.calSecret,
     googleplaces: new googleplaces(googConfig.apiKey, "json"),
     geocoder: new GoogleGeocoder({
         key: googConfig.mapsKey
@@ -140,11 +155,39 @@ massive({
     }
   })
 
+  app.post('/addavatar', function(req, res) {
+     try {  
+        objs.clientobj.addAvatar(Buffer.from(req.body.Image, 'base64')).then(r=>{
+            res.send({ status: 200, message:"OK"});
+        });
+     }
+     catch(e) {
+        console.log(e);
+        res.send({ status: 500, message:"An unexpected error occurred"});
+     }
+  })
+
+  app.post('/addcalendar', function(req, res) {
+     try {
+        objs.clientobj.addCalendar(req.body.CalendarType, req.body.Code).then(r=> {
+           if (r==="OK") {
+              res.send({ status: 200, message:r });
+           }
+           else {
+              res.send({ status: 500, message:r });
+           }
+        })
+     }
+     catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+     }
+  })
+
   app.post('/addcomment', function(req, res) {
      try {
         objs.eventsobj.addComment(req.body.EventID, req.body.EventGuestID, req.body.ParentID, req.body.Comment).then(r=> {
-          if (r==="OK") {
-            res.send({ status: 200, message:"OK" });
+          if (r.indexOf("{")>-1) {
+            res.send({ status: 200, message:r });
           }        
           else {
             res.send({ status: 500, message:r });
@@ -156,7 +199,51 @@ massive({
      }
   })
 
-  app.post('/addguest', function(req, res) {
+  app.post('/addgroup', function(req, res) {
+    try {
+       objs.clientobj.addGroup(req.body.GroupName, req.body.Clients).then(r=> {
+         if (r==="OK") {
+           res.send({ status: 200, message:r });
+         }        
+         else {
+           res.send({ status: 500, message:r });
+         }
+       })
+    }
+    catch(e) {
+     res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+ })
+
+ app.post('/addtogooglecalendar', function(req, res) {
+     objs.clientobj.addToGoogleCalendar(req.body.EventName, req.body.EventAddr, req.body.EventStartDate, req.body.EventEndDate, req.body.EventDesc).then(r=>{
+        if (r==="OK") {
+           res.send({ status: 200, message:r });
+        }
+        else {
+          res.send({ status: 500, message:r });
+        }
+     });
+ })
+
+ app.post('/addtogroup', function(req, res) {
+  try {
+     objs.clientobj.addToGroup(req.body.ClientGroupID, req.body.Client).then(r=> {
+       if (r.length===36) {
+         res.send({ status: 200, message:r });
+       }        
+       else {
+         res.send({ status: 500, message:r });
+       }
+     })
+  }
+  catch(e) {
+   res.send({ status: 500, message:"An unexpected error occurred"});
+  }
+})
+
+
+app.post('/addguest', function(req, res) {
     try {
        var guestobj={
           gname: req.body.gname,
@@ -169,23 +256,27 @@ massive({
        if (vg==="OK") {
          objs.sessionobj.verify().then(c=> {
             objs.eventsobj.getEventById(req.body.EventID).then(e=> {
-                if (e.GuestsCanBringOthers===true && e.ActionReq>0) {
+                if ((e.CreatorID===c || e.GuestsCanBringOthers===true) && e.ActionReq>0) {
+
+                  if (e.Guests.length+1>e.EventMaxCapacity) {
+                       res.send({ status: 500, message:"This event is at capacity and cannot accept any additional RSVPs" });
+                       return;
+                  }
 
                   for(var eg=0; eg<e.Guests.length; eg++) {
                     
-                    if ((c!==null && e.Guests[eg].ClientID===c) || 
-                        (guestobj.gphone!==null && guestobj.gphone!=="Not Specified" && e.Guests[eg].PhoneNumber===guestobj.gphone) || 
-                        (guestobj.gemail!==null && guestobj.gemail!=="Not Specified" && e.Guests[eg].EmailAddress===guestobj.gemail)) {
-                       res.send({ status: 500, message:"This person has already been added to the event/activity" });
+                    if ((guestobj.gphone!==null && guestobj.gphone.length>0 && guestobj.gphone!=="Not Specified" && e.Guests[eg].PhoneNumber===guestobj.gphone) || 
+                        (guestobj.gemail!==null && guestobj.gemail.length>0 && guestobj.gemail!=="Not Specified" && e.Guests[eg].EmailAddress===guestobj.gemail)) {
+                       res.send({ status: 500, message:"This person has already been added to the event" });
                        return;
                     }
                   }
 
-                  objs.eventsobj.addGuest(req.body.EventID, guestobj, false, c===null?null:c).then(r=> {
+                  objs.eventsobj.addGuest(req.body.EventID, guestobj, false, e.CreatorID===c?null:c).then(r=> {
                       if (r!==null) {
-                        objs.eventsobj.addScheduledGuest(e.Schedules[0].EventScheduleID, r.EventGuestID).then(egs=> {
+                        objs.eventsobj.addScheduledGuest(e.Schedules[0].EventScheduleID, r.EventGuestID, e.CreatorID===c, e, r).then(egs=> {
                             if (e.NotifyWhenGuestsAccept===true) {
-                                objs.messageobj.sendMessage(e.CreatorPhone,"New attendee "+guestobj.gname+" RSVPed to your event/activity "+e.EventName);
+                                objs.messageobj.sendMessage(e.CreatorPhone,"New attendee "+guestobj.gname+" RSVPed to your event "+e.EventName);
                             }
                             res.send({ status: 200, message:"OK" });
                         })
@@ -195,6 +286,9 @@ massive({
                       }
                     })
                 }
+                else {
+                  res.send({ status: 500, message:"Invalid Operation" });
+                }
               });
           })
       }
@@ -203,12 +297,27 @@ massive({
       }
     }
     catch(e) {
-     console.log(e);
      res.send({ status: 500, message:"An unexpected error occurred"});
     }
  })
 
-  app.post('/changenumber', function(req, res) {
+app.post('/cancelevent', function(req, res) {
+  try {
+    objs.eventsobj.cancelEvent(req.body.EventID).then(r=>{
+        if (r==="OK") {
+          res.send({ status: 200, message:r });
+        }        
+        else {
+          res.send({ status: 500, message:r });
+        }
+    })
+  } 
+  catch(e) {
+     res.send({ status: 500, message:"An unexpected error occurred"});
+  } 
+})
+
+app.post('/changenumber', function(req, res) {
     try {
       objs.clientobj.changeNumber(req.body.Passwd, req.body.PhoneNumber).then(r=> {
           if (r==="OK") {
@@ -251,6 +360,29 @@ massive({
       }
   })
 
+  app.post('/checkoutconfirm', function(req, res) {
+      let event=null;
+      try {
+          event = stripe.webhooks.constructEvent(
+            req.rawBody,
+            req.headers["stripe-signature"],
+            stripeConfig.checkout_confirm
+          );
+      } catch (err) {
+          return res.sendStatus(400);
+      }
+
+      if (event!==null) {
+         data = event.data;
+         console.log(data);
+
+         res.sendStatus(200);
+      }
+      else {
+         res.sendStatus(400);
+      }
+  })
+
   app.post('/contact', function(req, res) {
       try {
         var r = objs.clientobj.contact(req.body);
@@ -269,8 +401,6 @@ massive({
   app.post('/createaccount', function (req, res)
   {
       try {
-        res.send({status:500, message:"New account creation disabled"});
-        return;
 
         objs.clientobj.verifyCaptcha(req.body.recaptchaToken).then(re => {
            if (re==="OK") {
@@ -329,6 +459,54 @@ massive({
       }
   })
 
+  app.post('/createcheckout', function(req, res) {
+      objs.sessionobj.verify().then(r=> {
+        if (r!==null) {
+            objs.clientobj.getClientByID(req.body.ClientID).then(c => {
+                const { planId } = req.body;
+
+                if (c.PaymentID===null) {
+                    var nm="";
+                    try {
+                       nm=c.FirstName+" "+c.LastName;
+                    }
+                    catch(e) {}
+
+                    stripe.customers.create({
+                        phone: c.PhoneNumber,
+                        name: nm
+                    }).then(customer=>{
+                        if (customer!==null) {
+                            db.Clients.update({
+                                ClientID: c.ClientID
+                            },{
+                                PaymentID: customer.id       
+                            }).then(q=>{
+                                objs.clientobj.doCheckout(customer.id, planId, res, stripe);
+                            })
+                        }
+                        else {
+                          res.send({
+                             status: 500,
+                             message: "Invalid"
+                          });
+                        }
+                    })
+                }
+                else {
+                    objs.clientobj.doCheckout(c.PaymentID, planId, res, stripe);
+                }
+            }) 
+          }
+          else {
+            res.send({
+              status: 500,
+              message: "Invalid"
+            });
+          }
+      });
+  })
+
 	app.post('/createevent', function (req, res) 
   {
      try {
@@ -344,6 +522,7 @@ massive({
       
      }
      catch(e) {
+         console.log(e);
          res.send({ status: 500, message:"An unexpected error occurred"});
      } 
   })
@@ -364,6 +543,22 @@ massive({
     }
   })
 
+  app.post('/doemailoptout', function(req, res) {
+    try {
+        objs.clientobj.emailOptOut(req.body.EmailAddress).then(r=> {
+            if (r==="OK") {
+                res.send({ status: 200, message:"OK"});
+            }
+            else {
+                res.send({ status: 500, message:r});
+            }
+        })
+    }
+    catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
   app.post('/dorsvp', function(req, res) {
      try {
          objs.eventsobj.doRSVP(req.body.EventID, req.body.EventScheduleID, req.body.rsvp, req.body.me).then(r=> {
@@ -378,6 +573,38 @@ massive({
      catch(e) {
          res.send({ status: 500, message:"An unexpected error occurred"});
      }
+  })
+
+  app.post('/editgroupmember', function(req, res) {
+      try {
+        objs.clientobj.editGroupMember(req.body.ClientGroupClientID, req.body.Name, req.body.EmailAddress, req.body.PhoneNumber).then(r=>{
+          if (r==="OK") {
+            res.send({ status: 200, message:"OK" });
+          }        
+          else {
+            res.send({ status: 500, message:r });
+          }
+        })
+    }
+    catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/editgroupname', function(req, res) {
+      try {
+         objs.clientobj.editGroupName(req.body.ClientGroupID, req.body.GroupName).then(r=>{
+          if (r==="OK") {
+            res.send({ status: 200, message:"OK" });
+          }        
+          else {
+            res.send({ status: 500, message:r });
+          }
+         })
+      }
+      catch(e) {
+         res.send({ status: 500, message:"An unexpected error occurred"});
+      }
   })
 
   app.post('/filladdress', function (req, res) {
@@ -420,14 +647,16 @@ massive({
                     var cliobj = {
                         FirstName: c.FirstName==null?"":xss(c.FirstName),
                         LastName: c.LastName==null?"":xss(c.LastName),
+                        EventCount: c.EventCnt,
                         Address: c.Address==null?"":xss(c.Address),
                         City: c.City==null?"":xss(c.City),
                         State: c.State==null?"":xss(c.State),
                         PostalCode: c.PostalCode==null?"":xss(c.PostalCode),
                         PhoneNumber: xss(c.PhoneNumber),
                         EmailAddress: c.EmailAddress==null?"":xss(c.EmailAddress),
-                        IsPremium: c.IsPremium==null?false:xss(c.IsPremium),
-                        IsPro: c.IsPro==null?false:xss(c.IsPro)                        
+                        IsPremium: c.IsPremium==null?false:c.IsPremium,
+                        IsPro: c.IsPro==null?false:c.IsPro,
+                        AccountType: c.AccountType                      
                     }
 
                     res.send({ status: 200, message:JSON.stringify(cliobj)});
@@ -442,6 +671,64 @@ massive({
         res.send({ status: 500, message:"An unexpected error occurred"});
      }
   })
+
+  app.post('/getclientcalendars', function(req, res) {
+      objs.clientobj.getClientCalendars().then(r=>{
+           if (r!=="Invalid") {
+               res.send({ status: 200, message:r}); 
+           }
+           else {
+               res.send({ status: 500, message:"An unexpected error occurred"});
+           }
+      })
+  })
+
+  app.post('/getclientorderhistory', function (req, res) {
+      objs.clientobj.getOrderHistoryForClient().then(r=>{
+          if (r!==null) {
+             res.send({ status: 200, message:r}); 
+          }
+          else {
+             res.send({ status: 500, message:"An unexpected error occurred"});
+          }
+      })
+  })
+
+  app.post('/getbyphoneoremail', function(req, res) {
+      try {
+          if (req.body.PhoneNumber!==null && req.body.PhoneNumber!=="Not Specified") {
+
+            var sPhone = objs.utilityobj.standardizePhone(req.body.PhoneNumber);
+            if (sPhone!=="NotOK") {
+
+              objs.clientobj.getClientByPhone(sPhone).then(c=> {
+                if (c!==null) {
+                  res.send({ status: 200, message:c.ClientID}); 
+                }
+                else {
+                  res.send({ status: 500, message:"An unexpected error occurred"}); 
+                }
+              });
+            }
+            else {
+              res.send({ status: 500, message:"An unexpected error occurred"}); 
+            }
+          }
+          else if (req.body.EmailAddress!==null && req.body.EmailAddress!=="Not Specified") {
+            objs.clientobj.getClientByEmail(req.body.EmailAddress).then(c=> {
+              if (c!==null) {
+                res.send({ status: 200, message:c.ClientID}); 
+              }
+              else {
+                res.send({ status: 500, message:"An unexpected error occurred"}); 
+              }
+            });
+          }
+      }  
+      catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+      }
+  });
 
   app.post('/getevents', function(req, res) {
     try {
@@ -483,23 +770,84 @@ massive({
       }
   })
 
-  app.post('/locationfinder', function(req, res) {
-     try {
-         if (req.body.PickLocation===true) {
-       
-            objs.geocoder.find(req.body.Geocode, function(err,r) {
-
-                objs.eventsobj.locationFinder(req.body.Place, [r[0].location.lat,r[0].location.lng], req.body.Keyword, function(error,response) {
-                  response.foundCoords=[r[0].location.lat,r[0].location.lng];
-                  res.send({ status: 200, message:JSON.stringify(response) })
-                });
-            });
+  app.post('/getclientsforgroup', function(req, res) {
+    try {
+      objs.clientobj.getClientsForGroup(req.body.ClientGroupID).then(cgs=>{
+         if (cgs!==null && cgs.Clients.length>0) {
+             res.send({ status: 200, message:xss(JSON.stringify(cgs))})
          }
          else {
-            objs.eventsobj.locationFinder(req.body.Place, req.body.Coords, req.body.Keyword, function(error,response) {
-              res.send({ status: 200, message:JSON.stringify(response) })
-            });
+             res.send({ status: 200, message:"NOCLIENTS"})
          }
+      }); 
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/getgroupsforclient', function(req, res) {
+     try {
+       objs.clientobj.getGroupsForClient().then(cgs=>{
+          if (cgs!==null && cgs.length>0) {
+              res.send({ status: 200, message:xss(JSON.stringify(cgs))})
+          }
+          else {
+              res.send({ status: 200, message:"NOGROUPS"})
+          }
+       }); 
+     }
+     catch(e) {
+       res.send({ status: 500, message:"An unexpected error occurred"});
+     }
+  })
+
+  app.post('/getcomments', function(req, res) {
+    try {
+      objs.eventsobj.getComments(req.body.EventID).then(r=>{
+          res.send({ status: 200, message:xss(JSON.stringify(r))})
+      }); 
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/getsuggestedlocations', function(req, res) {
+    try {
+      objs.eventsobj.getSuggestedLocations(req.body.EventID, req.body.IterationNum).then(r=>{
+          res.send({ status: 200, message:xss(JSON.stringify(r))})
+      }); 
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/getsuggestedtimes', function(req, res) {
+    try {
+      objs.eventsobj.getSuggestedTimes(req.body.EventID, req.body.IterationNum).then(r=>{
+          res.send({ status: 200, message:xss(JSON.stringify(r))})
+      }); 
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+
+  app.post('/locationdetails', function(req, res) {
+    try {
+       objs.eventsobj.doLocationDetails(req,res); 
+    }
+    catch(e) {
+       res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+ })
+
+  app.post('/locationfinder', function(req, res) {
+     try {
+        objs.eventsobj.doLocationFinder(req,res); 
      }
      catch(e) {
         res.send({ status: 500, message:"An unexpected error occurred"});
@@ -545,18 +893,75 @@ massive({
 
   app.post('/pickforus', function(req,res) {
       try {
-          var r = objs.pickobj.doPickForUs(req.body);
-          if (r===null) {
-             res.send({ status: 200, message:"N"});
-          }
-          else {
-             res.send({ status: 200, message:JSON.stringify(r)});
-          }
+          objs.pickobj.doPickForUs(req.body).then(r=>{
+            if (r===null) {
+              res.send({ status: 200, message:"N"});
+            }
+            else {
+                res.send({ status: 200, message:JSON.stringify(r)});
+            }
+          });        
       }
       catch(e) {
-         console.log(e);
          res.send({ status: 500, message:"An unexpected error occurred"});
       }
+  });
+
+  app.post('/removeattendee', function(req, res) {
+      try {
+         objs.eventsobj.verifyOwner(req.body.EventID).then(o=>{   
+            objs.eventsobj.removeAttendee(o.EventID,req.body.PhoneNumber,req.body.EmailAddress).then(r=>{
+              if (r==="OK") {
+                res.send({ status: 200, message:r });
+              }        
+              else {
+                res.send({ status: 500, message:r });
+              }
+            })
+
+         });
+      }
+      catch(e) {
+         res.send({ status: 500, message:"An unexpected error occurred"});
+      }
+  });
+
+  app.post('/removegroup', function(req, res) {
+    try {
+       objs.clientobj.removeGroup(req.body.ClientGroupID).then(r=> {
+         if (r==="OK") {
+           res.send({ status: 200, message:r });
+         }        
+         else {
+           res.send({ status: 500, message:r });
+         }
+       })
+    } 
+    catch(e) {
+     res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+ })
+
+ app.post('/removefromgroup', function(req, res) {
+    try {
+      objs.clientobj.removeFromGroup(req.body.ClientGroupID, req.body.ClientGroupClientID).then(r=> {
+        if (r==="OK") {
+          res.send({ status: 200, message:r });
+        }        
+        else {
+          res.send({ status: 500, message:r });
+        }
+      })
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+ })
+
+  app.post('/reportcomment', function(req, res) {
+     objs.eventsobj.reportComment(req.body.EventCommentID).then(e=>{
+      res.send({ status: 200, message:"OK" });
+     });
   });
 
   app.post('/resendtext', function(req, res) {
@@ -623,6 +1028,125 @@ massive({
     }
   })
 
+  app.post('/updatelocation', function(req,res) {
+    try {
+      objs.eventsobj.verifyOwner(req.body.EventID).then(o=>{   
+         objs.clientobj.getClientByID(o.CreatorID).then(cli=> { 
+
+              if (cli.IsPremium && !cli.IsPro) {
+                   if (cli.EventCnt>=30) {
+                      res.send({ status: 500, message:"You have reached your schedule limit for the month"});
+                      return;
+                   }
+              }
+              if (!cli.IsPremium && !cli.IsPro) {
+                    if (cli.EventCnt>=3) {
+                      res.send({ status: 500, message:"You have reached your schedule limit for the month"});
+                      return;
+                    }   
+              }
+
+              if (o!==null) {
+
+                var addrr = objs.eventsobj.verifyAddress(req);
+                if (addrr!=="OK") {
+                    res.send({ status: 500, message: addrr})
+                }
+                else {
+                  objs.eventsobj.rescheduleEvent(o.EventID, null, null, req.body.Location, req.body.EventStreet, req.body.EventCity, req.body.EventState, req.body.EventZip, -1);
+                  res.send({ status: 200, message:"OK"});
+                }
+              }
+              else {
+                  res.send({ status: 500, message:"Invalid operation"});
+              }
+          })
+      });
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/updatetime', function(req,res) {
+    try {
+      objs.eventsobj.verifyOwner(req.body.EventID).then(o=>{
+          if (o!==null) {
+              objs.clientobj.getClientByID(o.CreatorID).then(cli=> { 
+
+                  if (cli.IsPremium && !cli.IsPro) {
+                      if (cli.EventCnt>=30) {
+                          res.send({ status: 500, message:"You have reached your schedule limit for the month"});
+                          return;
+                      }
+                  }
+                  if (!cli.IsPremium && !cli.IsPro) {
+                        if (cli.EventCnt>=3) {
+                          res.send({ status: 500, message:"You have reached your schedule limit for the month"});
+                          return;
+                        }   
+                  }
+                  var sdate = new Date(req.body.EventDate).getTime()+(o.TimezoneOffset*60*1000);
+                  var vdate = new Date().getTime()+(o.TimezoneOffset*60*1000);
+                  var edate=null;
+    
+                  if (req.body.EndDate!==null) {
+                    edate = new Date(req.body.EndDate).getTime();
+                  }
+
+                  var diff = sdate-vdate;
+                  if (diff<0) {
+                      return "Cannot schedule dates in the past";
+                  }
+
+                  if (edate!==null && req.body.EventLength==='i') {
+                      if (edate-sdate<0) {
+                          return "The end date cannot be before the start date";
+                      }
+                  }
+
+                  if (edate!=null && req.body.EventLength!=='i') {
+                      return "Invalid operation";
+                  }
+
+                  objs.eventsobj.rescheduleEvent(o.EventID, sdate, edate, null, null, null, null, null, -1);
+                  res.send({ status: 200, message:"OK"});
+             });
+          }
+          else {
+              res.send({ status: 500, message:"Invalid operation"});
+          }
+      });
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
+  app.post('/updatetitle', function(req, res) {
+    try {
+       objs.eventsobj.verifyOwner(req.body.EventID).then(o=>{
+           if (o!==null) {
+              if (req.body.Title.length>0 && req.body.Title.length<=128) {
+                  db.Events.update({
+                      EventID: req.body.EventID  
+                  },{
+                      EventName: req.body.Title
+                  });
+
+                  res.send({ status: 200, message:"OK"});
+              }
+           }
+           else {
+              res.send({ status: 500, message:"Invalid operation"});
+           }
+       })
+    }
+    catch(e) {
+      res.send({ status: 500, message:"An unexpected error occurred"});
+    }
+  })
+
   app.post('/verifyaccount', function(req, res) {
     try {
       objs.clientobj.verifyAccount(req.body.ClientID, req.body.VerificationCode).then(r=> {
@@ -655,21 +1179,22 @@ massive({
       }
   })
 
-  app.post('/verifyphone', function(req, res) {
-    try {
-      objs.eventsobj.verifyPhoneConfirm(req.body.EventID, req.body.Hash).then(r=> {
-          if (r!=="Fail") {
-            res.send({ status: 200, message:r });
-          }        
-          else {
-            res.send({ status: 500, message:"Fail" });
-          }
-      });
-    }
-    catch(e) {
-      res.send({ status: 500, message:"An unexpected error occurred"});
-    }
-})
+  app.post('/verifygooglogin', function(req, res) {
+      try {
+        objs.clientobj.verifyGoogleLogin(req.body.Token, req.body.Phone, req.body.EmailAddress).then(r=> {
+            if (r==="OK"||r==="NEEDPHONE"||r[0]==="{") {
+              res.send({ status: 200, message:r });
+            }        
+            else {
+              res.send({ status: 500, message:r });
+            }
+        });
+      }
+      catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+      }
+  });
+
 
   app.listen(process.env.PORT || 80, () => console.log(`Schedule Us has started`))
 });
