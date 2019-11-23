@@ -1,5 +1,37 @@
 class events {
 
+    async acceptChanges(eventID) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c!==null) {
+                return this.db.Events.findOne({
+                    EventID: eventID,
+                    CreatorID: c
+                }).then(ev=>{
+                    if (ev!==null) {
+                        if (ev.ActionReq===5 || ev.ActionReq===6) {
+                            return this.db.Events.update({
+                                EventID: ev.EventID 
+                            },{
+                                ActionReq: 1
+                            }).then(fev=>{
+                                return "OK";
+                            })
+                        }
+                        else {
+                            return "Event not found";
+                        }
+                    }
+                    else {
+                        return "Event not found";
+                    }
+                })
+            }
+            else {
+                return "Invalid Operation"; 
+            }
+        })
+    }
+
     async acceptReschedule(eventID,me,imic) {
         return await this.getEventById(eventID).then({
             and:[{
@@ -200,7 +232,7 @@ class events {
     }
 
     async addScheduledGuest(eventScheduleID,eventGuestID,newSS,eventobj,egobj) {
-        return await this.getPhoneID(eventGuestID).then(ph=> {
+        return await this.getPhoneID(egobj.PhoneNumber).then(ph=> {
             this.db.EventScheduleGuests.insert({
                 EventGuestID: eventGuestID,
                 Acceptance: newSS===true?null:true,
@@ -839,31 +871,67 @@ class events {
     }
 
     // Make sure that users don't have other events on other phone numbers
-    async getPhoneID(eventGuestID) {
-        return await this.db.EventScheduleGuests.find({
-            EventGuestID: eventGuestID
-        }).then(r=>{
-            return this.db.PhoneNumbers.find().then(p=> {
-                var pa=[];
-                for(var x=0; x<p.length; x++) {
-                    pa.push(x);
-                }
-                
-                pa = this.objs.utilityobj.shuffle(pa);
-                
-                for (var y=0; y<pa.length; y++) {
-                    var itsGood=true;
-                    for (var e=0; y<r.length; r++) {
-                        if (r[e].PhoneID===p[pa[y]].PhoneID) {
-                            itsGood=false;
+    async getPhoneID(guestPhone) {
+        return await this.db.EventGuests.find({
+            PhoneNumber: guestPhone
+        }).then(egs=>{
+
+            var por=[];
+            var eor=[];
+            for(var x=0; x<egs.length; x++) {
+                eor.push({EventID: egs[x].EventID})
+            }
+
+            return this.db.Events.find({
+                or: eor 
+            }).then(evs=>{     
+
+                var d = new Date();
+                for(var q=0; q<evs.length; q++) { 
+                    if (evs[q].EventDate>=d.getTime()) {
+                        for (var x=0; x<egs.length; x++) {
+                            if (egs[x].EventID===evs[q].EventID) {
+                                por.push({EventScheduleID: egs[x].EventScheduleID})
+                            }
                         }
-                    }   
-                    if (itsGood) {
-                        return p[pa[y]].PhoneID;
-                    }
+                    }                 
                 }
 
-                return p[0].PhoneID;
+                if (por.length===0) {
+                    return this.db.PhoneNumbers.find().then(p=> { 
+                        return p[0].PhoneID;                    
+                    })
+                }
+                else {
+
+                    return this.db.EventScheduleGuests.find({  
+                        or: por                
+                    }).then(r=>{
+                
+                        return this.db.PhoneNumbers.find().then(p=> {
+                            var pa=[];
+                            for(var x=0; x<p.length; x++) {
+                                pa.push(x);
+                            }
+                            
+                            pa = this.objs.utilityobj.shuffle(pa);
+                            
+                            for (var y=0; y<pa.length; y++) {
+                                var itsGood=true;
+                                for (var e=0; e<r.length; e++) {
+                                    if (r[e].PhoneID===p[pa[y]].PhoneID) {
+                                        itsGood=false;
+                                    }
+                                }   
+                                if (itsGood) {
+                                    return p[pa[y]].PhoneID;
+                                }
+                            }
+
+                            return p[0].PhoneID;
+                        })
+                    })
+                }
             })
         })
     }
@@ -885,17 +953,56 @@ class events {
         }
     }
 
-    async phoneSecurity(actionReq,phone) {
-        if (actionReq===1) {
-            return "OK"
-        }
-        return this.db.Clients.findOne({
-            PhoneNumber: phone
-        }).then(c=> {
-            if (c===null) {
-                return "OK"
+    async rejectChanges(eventID) { 
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c!==null) {
+                return this.db.Events.findOne({
+                    EventID: eventID,
+                    CreatorID: c
+                }).then(ev=>{
+                    return this.db.EventSchedules.find({
+                        EventID: eventID
+                    },{
+                        order: [
+                            {field: "IterationNum", direction: "desc"}
+                        ]
+                    }).then(es=>{
+                        if (es.length>1) {
+                            return this.db.EventScheduleGuests.destroy({
+                                EventScheduleID: es[0].EventScheduleID
+                            }).then(r=>{
+                                return this.db.EventSchedules.destroy({
+                                    EventScheduleID: es[0].EventScheduleID
+                                }).then(r2=>{
+                                    return this.db.EventSchedules.update({
+                                        EventScheduleID: es[1].EventScheduleID
+                                    },{
+                                        Status: 0
+                                    }).then(aev=>{
+                                        return this.db.Events.update({
+                                            EventID: eventID
+                                        },{
+                                            EventDate: es[1].StartDate,
+                                            ActionReq:1,
+                                            Reschedule:false
+                                        }).then(pox=>{
+                                            
+                                            return "OK"
+                                        })
+                                    })
+                                   
+                                })
+                            })
+                        }
+                        else {
+                            return "Invalid Operation";
+                        }
+                    })
+                })
             }
-            return null;
+            else {
+                return "Invalid Operation";
+            }
         })
     }
 
@@ -979,6 +1086,7 @@ class events {
     }
 
     async rescheduleEvent(eventid,startdate,enddate,location,address,city,state,postalcode,flow) {
+
         return await this.db.EventSchedules.findOne({
             EventID: eventid,
             Status: 0
@@ -1047,7 +1155,7 @@ class events {
                                 })
                             }
 
-                            return this.db.Events.find({
+                            return this.db.Events.findOne({
                                 EventID: eventid
                             }).then(ev=>{
                                 var areq=1;
@@ -1109,7 +1217,7 @@ class events {
 
                 this.addGuest(eventid, params.Guests[x], false, null).then(g=> {
                     if (g!==null) { 
-                        this.getPhoneID(g.EventGuestID).then(ph=> {
+                        this.getPhoneID(g.PhoneNumber).then(ph=> {
                             this.db.EventScheduleGuests.insert({
                                 EventGuestID: g.EventGuestID,
                                 Acceptance: null,
@@ -1131,7 +1239,7 @@ class events {
                     greq: true,                    
                 }, true, clientid).then(gr=> {
                     if (gr!==null) {
-                        this.getPhoneID(gr.EventGuestID).then(ph=> {
+                        this.getPhoneID(gr.PhoneNumber).then(ph=> {
                             this.db.EventScheduleGuests.insert({
                                 EventGuestID: gr.EventGuestID,
                                 Acceptance: true,
@@ -1215,9 +1323,15 @@ class events {
                             }
                         }
 
-                        return this.rescheduleEvent(eventid,null,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1).then(rse=> {
-                            return "OK"
-                        })
+                
+                        return this.db.EventSuggestedLocations.destroy({
+                            EventID: eventid
+                        }).then(esttwo=>{
+
+                            return this.rescheduleEvent(eventid,null,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1).then(rse=> {
+                                return "OK"
+                            })
+                        });
                     }
                     else {
                         return "OK"
@@ -1290,10 +1404,15 @@ class events {
                                 winner=pollResults[w];
                             }
                         }
+                        return this.db.EventSuggestedTimes.destroy({
+                            EventID: eventid
+                        }).then(esttwo=>{
 
-                        return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,null,2).then(rse=> {
-                            return "OK"
-                        })
+                            return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,null,2).then(rse=> {
+                                return "OK"
+                            })
+
+                        });
 
                     }
                     else {
@@ -1376,7 +1495,7 @@ class events {
                     }
                 }
 
-                var vg = this.verifyGuest(req.body.Guests[g]);
+                var vg = this.verifyGuest(req.body.Guests[g],cli);
                 if (vg!=="OK") {
                     return vg;
                 }
@@ -1398,6 +1517,10 @@ class events {
             } 
             if (req.body.GuestLimitTotal>15 && cli.IsPro!==true && cli.IsPremium!==true) {
                 return "Non-premium accounts are allowed up to 15 attendees";
+            }
+
+            if (req.body.Guests.length>req.body.GuestLimitTotal) {
+                return "The maximum attendee limit cannot be smaller than the number of guests";
             }
 
 
@@ -1440,7 +1563,7 @@ class events {
         return "OK"
     }
 
-    verifyGuest(guest) {
+    verifyGuest(guest,cli) {
         if (guest.gname.length<1 || guest.gname.length>128) {
             return "Invalid attendee name";
         }
@@ -1449,6 +1572,12 @@ class events {
             if (vp!=="OK") {
                 return "An attendee has an invalid phone number"
             }
+        }
+        if (guest.gemail!==null && guest.gemail===cli.EmailAddress) {
+            return "You cannot invite yourself";
+        }
+        if (guest.gphone!==null && this.objs.utilityobj.standardizePhone(guest.gphone)===cli.PhoneNumber) {
+            return "You cannot invite yourself";
         }
         if (guest.gemail!=null && guest.gemail.length>0 && guest.gemail!=="Not Specified" && guest.gemail!==null) {
             var ve = this.objs.utilityobj.verifyEmail(guest.gemail);

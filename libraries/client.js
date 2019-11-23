@@ -156,6 +156,7 @@ class client {
                     })
 
                 }).catch((error)=>{
+                    console.log(error);
                     return "Error";
                 })
             }
@@ -229,7 +230,7 @@ class client {
                         const oauth2Client = new this.objs.google.auth.OAuth2(
                             "801199894294-iei4roo6p67hitq9sc2tat5ft24qfakt.apps.googleusercontent.com", 
                             "WOihpgSDdZkA81FS8mF_RxmS", 
-                            "https://localhost:8000/googcalendar" 
+                            "https://stage.schd.us/googcalendar" 
                         );
                         
                         oauth2Client.setCredentials({
@@ -454,42 +455,59 @@ class client {
 
     async delete() {
         return await this.objs.sessionobj.verify().then(c=> {
-            this.objs.sessionobj.deleteForClient(c);
 
-            return this.db.Events.find({
-                CreatorID: c,
-                ActionReq: 2
-            }).then(e=>{
+            return this.getClientByID(c).then(cli=> {
 
-                for(var xe=0; xe<e.length; xe++) {
-                    this.objs.eventsobj.cancelEvent(e.EventID);
+                if (cli.SubTerminationDate===null && (cli.IsPro===true || cli.IsPremium===true)) {
+                     return "You must cancel your subscription before deleting your account";
                 }
 
-                var self=this;
-                setTimeout(function() {
-                    return self.db.Events.destroy({
-                        CreatorID: c
-                    }).then(q=>{
-                        self.db.Clients.destroy({
-                            ClientID: c
-                        })  
-                    })
-                },3500)
+                this.objs.sessionobj.deleteForClient(c);
 
-                return "OK";
+                return this.db.Events.find({
+                    CreatorID: c,
+                    ActionReq: 2
+                }).then(e=>{
 
-            })    
+                    for(var xe=0; xe<e.length; xe++) {
+                        this.objs.eventsobj.cancelEvent(e.EventID);
+                    }
+
+                    var self=this;
+                    setTimeout(function() {
+                        return self.db.Events.destroy({
+                            CreatorID: c
+                        }).then(q=>{
+                            self.db.Clients.destroy({
+                                ClientID: c
+                            })  
+                        })
+                    },3500)
+
+                    return "OK";
+
+                })    
+            })
         })
     }
 
     doCheckout(customerID, planId, res, stripe) {
+
+        var amt=1197;
+        if (planId==="plan_G9HmWLmLGbPe6m") {
+            amt=5997;
+        }
+
         stripe.checkout.sessions.create({
             customer: customerID,
             payment_method_types: ["card"],
-            subscription_data: { items: [{ plan: planId }] },
+            mode: "subscription",
+            line_items: [{ amount: amt, currency: "USD", name:"First Three Months", quantity:1}],
+            subscription_data: { items: [{ plan: planId }], trial_from_plan:true },
             success_url: "https://"+this.objs.envURL+'/purchase?session_id={CHECKOUT_SESSION_ID}',
             cancel_url: "https://"+this.objs.envURL+'/cancel'
          }).then(session=>{
+
               res.send({
                 status: 200,
                 sessionId: session.id
@@ -949,16 +967,28 @@ class client {
         return await this.objs.sessionobj.verify().then(c=> {
 
             if (c!==null) {
-                return this.db.ClientEmailVerification.insert({
-                    ClientEmailVerificationID: this.objs.uuidv4(),
-                    ClientID: c,
-                    EmailAddress: emailaddress,
-                    Verification: this.objs.utilityobj.createHash(64)
-                }).then(r=> {
-                    this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click https://"+this.objs.envURL+"/verifyemail?c="+c+"&v="+r.Verification+" to verify your email address");
-
-                    return "OK";
-                });
+                return this.getClientByID(c).then(cli=> {
+                    if (cli.AccountType===0) {
+                        return this.db.ClientEmailVerification.destroy({
+                            ClientID: c
+                        }).then(q=>{
+                            return this.db.ClientEmailVerification.insert({
+                                ClientEmailVerificationID: this.objs.uuidv4(),
+                                ClientID: c,
+                                EmailAddress: emailaddress,
+                                Verification: this.objs.utilityobj.createHash(64)
+                            }).then(r=> {
+                                this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click https://"+this.objs.envURL+"/verifyemail?c="+c+"&v="+r.Verification+" to verify your email address");
+            
+                                return "OK";
+                            });
+                        })
+                    }
+                    else {
+                        return "An unexpected problem occurred";
+                    }
+                })
+               
             }
             else {
                 return "An unexpected problem occurred";
@@ -968,7 +998,7 @@ class client {
     }
 
 
-    verify(firstname,lastname,phone,passwd) {
+    verify(firstname,lastname,phone,passwd,secanswer) {
 
         if (firstname.length<1) {
             return "First name is required";
@@ -984,6 +1014,10 @@ class client {
 
         if (lastname.length>64) {
             return "Last name is too long";
+        }
+
+        if (secanswer.length===0) {
+            return "Security answer is required";
         }
 
         var vp = this.objs.utilityobj.verifyPhone(phone);

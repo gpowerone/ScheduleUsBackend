@@ -145,7 +145,7 @@ class utilities {
     }
 
     verifyEmail(emailaddress) {
-        var emailVerification = /^(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}$/;
+        var emailVerification = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(.\w{2,3})+$/;
         if (!emailVerification.test(emailaddress)) {
             return "Email address is invalid";
         }

@@ -4,6 +4,9 @@ class pickforus {
     // Builds ranges for calendar dates
     buildCalendarDates(calendarDateTimes) {
         var calendarDates=[];
+        if (calendarDateTimes===null) {
+            return calendarDates;
+        }
 
         for (var z=0; z<calendarDateTimes.length; z++) {
             for (var q=0; q<calendarDateTimes[z].length; q++) {
@@ -225,9 +228,11 @@ class pickforus {
                     return "You must be logged in to use Pick for Us";
                 }
 
+                /*
                 if (cli.PFUSusage>=15) {
                     return "You have reached the maximum number of times you may use Pick for Us today. Please try again tomorrow.";
                 }
+                */
 
                 return this.db.Clients.update({
                     ClientID: cli.ClientID
@@ -360,14 +365,14 @@ class pickforus {
     }
 
     // performs google calendar lookups
-    getGoogleCalendar(refreshToken) {
+    getGoogleCalendar(refreshToken,clientID) {
 
         try {
           
             const oauth2Client = new this.objs.google.auth.OAuth2(
                 "801199894294-iei4roo6p67hitq9sc2tat5ft24qfakt.apps.googleusercontent.com", 
                 "WOihpgSDdZkA81FS8mF_RxmS", 
-                "https://localhost:8000/googcalendar" 
+                "https://stage.schd.us/googcalendar" 
             );
             
             oauth2Client.setCredentials({
@@ -406,16 +411,17 @@ class pickforus {
             })
         }
         catch(e) {
-            console.log(e);
+            this.objs.messageobj.addToQueue(clientID, "Could not access your calendar. Please re-integrate your calendar on the My Account page");
             return null;
         }
         
     }
 
-    getCalendarRecur(calendarTokens, filledCalendars) {
-        return this.getGoogleCalendar(calendarTokens[0]).then(cr=>{
+    getCalendarRecur(calendarTokens, filledCalendars, clientIDs) {
+        return this.getGoogleCalendar(calendarTokens[0], clientIDs[0]).then(cr=>{
             filledCalendars.push(cr);
             calendarTokens.shift();
+            clientIDs.shift();
 
             if (calendarTokens.length===0) {
                 return new Promise(function(resolve,reject) { 
@@ -423,7 +429,7 @@ class pickforus {
                 })
             }
             else {
-                return this.getCalendarRecur(calendarTokens, filledCalendars);                
+                return this.getCalendarRecur(calendarTokens, filledCalendars, clientIDs);                
             }
         });
     }
@@ -444,14 +450,16 @@ class pickforus {
 
                 var filledCalendars=[];
                 var calendarTokens=[];
+                var clientIDs=[];
 
                 for(var r=0; r<res.length; r++) {
                     if (res[r].CalendarType===0) {
                        calendarTokens.push(res[r].CalendarToken);
+                       clientIDs.push(res[r].ClientID);
                     }
                 }
                 
-                return this.getCalendarRecur(calendarTokens, filledCalendars);
+                return this.getCalendarRecur(calendarTokens, filledCalendars, clientIDs);
 
             })
         }
