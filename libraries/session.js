@@ -34,8 +34,8 @@ class Session {
         this.sessionLong=sessionLong;
     }
 
-    async verify(bypass) {
-        if (bypass===true || this.sessionID===null || this.sessionID.length!==36 || this.clientID===null || this.clientID.length!==36 || this.sessionLong===null) {
+    async verify() {
+        if (this.sessionID===null || this.sessionID.length!==36 || this.clientID===null || this.clientID.length!==36 || this.sessionLong===null) {
             return null;
         }
 

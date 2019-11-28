@@ -285,15 +285,15 @@ class client {
                 return "Client name is invalid";
             }
 
-            if (client.EmailAddress!==null && client.EmailAddress.length>0 && client.EmailAddress!=="Not Specified" && this.objs.utilityobj.verifyEmail(client.EmailAddress)!=="OK") {
+            if (client.EmailAddress!==null && client.EmailAddress.length>0  && this.objs.utilityobj.verifyEmail(client.EmailAddress)!=="OK") {
                 return "Invalid Email Address";
             }
     
-            if (client.PhoneNumber!==null && client.PhoneNumber.length>0 && client.PhoneNumber!=="Not Specified" && this.objs.utilityobj.verifyPhone(client.PhoneNumber)!=="OK") {
+            if (client.PhoneNumber!==null && client.PhoneNumber.length>0  && this.objs.utilityobj.verifyPhone(client.PhoneNumber)!=="OK") {
                 return "Invalid Phone Number";
             }
     
-            if (((client.EmailAddress===null||client.EmailAddress.length===0) && (client.PhoneNumber===null||client.PhoneNumber.length===0)) || (client.EmailAddress==="Not Specified" && client.PhoneNumber==="Not Specified")) {
+            if (((client.EmailAddress===null||client.EmailAddress.length===0) && (client.PhoneNumber===null||client.PhoneNumber.length===0))) {
                 return "You must have a phone number or email address";
             }
 
@@ -302,38 +302,38 @@ class client {
                 ClientID: c
             }).then(g=>{
                
+                var conditional=null;
                 var ph=this.objs.utilityobj.standardizePhone(client.PhoneNumber);
                 if (ph!=="NotOK") {
-
-                    return this.db.Clients.find({
-                        or:[
-                            {PhoneNumber: ph},
-                            {EmailAddress: client.EmailAddress}
-                        ]
-                    }).then(fc=>{
-                        var cl=null;
-                        if (fc!==null && fc.length>0) {
-                            cl=fc[0].ClientID;
-                        }
-
-                            return this.db.ClientGroupClients.insert({
-                                ClientGroupClientID: this.objs.uuidv4(),
-                                ClientGroupID: g.ClientGroupID,
-                                ClientID: cl,
-                                PhoneNumber: ph,
-                                EmailAddress: client.EmailAddress,
-                                Name: client.Name
-                            }).then(q=>{
-                                return q.ClientGroupClientID;
-                            })
-                        
-                
-                    })                
-                
+                    conditional={PhoneNumber: ph}; 
                 }
                 else {
-                    return "Failed to add"
+                    conditional={EmailAddress: client.EmailAddress};
                 }
+
+                return this.db.Clients.find({
+                    or:[
+                        conditional
+                    ]
+                }).then(fc=>{
+                    var cl=null;
+                    if (fc!==null && fc.length>0) {
+                        cl=fc[0].ClientID;
+                    }
+
+                        return this.db.ClientGroupClients.insert({
+                            ClientGroupClientID: this.objs.uuidv4(),
+                            ClientGroupID: g.ClientGroupID,
+                            ClientID: cl,
+                            PhoneNumber: ph,
+                            EmailAddress: client.EmailAddress,
+                            Name: client.Name
+                        }).then(q=>{
+                            return q.ClientGroupClientID;
+                        })
+                    
+            
+                })                
 
             })
         })
@@ -346,13 +346,14 @@ class client {
                 return "Invalid Credentials";
             }
 
-            return this.login(null,passwd,null,c).then(lr=> {
-                if (lr==="OK") {
-                    var sPhone=this.objs.utilityobj.standardizePhone(phone);
-                    if (sPhone!=="NotOK") {
-                        return this.objs.clientobj.getClientByPhone(sPhone).then(rvp=> {
-                            if (rvp===null) {
+            var sPhone=this.objs.utilityobj.standardizePhone(phone);
+            if (sPhone!=="NotOK") {
+                return this.objs.clientobj.getClientByPhone(sPhone).then(rvp=> {
+                    if (rvp===null) {
 
+                        return this.login(null,passwd,null,c).then(lr=> {
+                            if (cli.AccountType>0 || lr==="OK") {
+                 
                                 var hsh=this.objs.utilityobj.createHash(64);
 
                                 this.db.Clients.update({
@@ -372,18 +373,20 @@ class client {
                                 return "OK";
                             }
                             else {
-                                return "This account already exists";
+                                return "Error logging in";
                             }
                         });
                     }
                     else {
-                        return "Error validating phone number";
-                    }  
-                }
-                else {
-                    return "Login unsuccessful";
-                }
-            })
+                        return "This account already exists";
+                    }
+                   
+                })
+                
+            }
+            else {
+                return "Error validating phone number";
+            }  
            
         })
     }
@@ -557,46 +560,50 @@ class client {
                 return "Name is invalid";
             }
 
-            if (gemail!==null && gemail.length>0 && gemail!=="Not Specified" && this.objs.utilityobj.verifyEmail(gemail)!=="OK") {
+            if (gemail!==null && gemail.length>0 && this.objs.utilityobj.verifyEmail(gemail)!=="OK") {
                 return "Invalid Email Address";
             }
     
-            if (gphone!==null && gphone.length>0 && gphone!=="Not Specified" && this.objs.utilityobj.verifyPhone(gphone)!=="OK") {
+            if (gphone!==null && gphone.length>0 && this.objs.utilityobj.verifyPhone(gphone)!=="OK") {
                 return "Invalid Phone Number";
             }
     
-            if (((gemail===null||gemail.length===0) && (gphone===null||gphone.length===0)) || (gemail==="Not Specified" && gphone==="Not Specified")) {
+            if ((gemail===null||gemail.length===0) && (gphone===null||gphone.length===0)) {
                 return "You must have a phone number or email address";
             }
 
-            return this.db.ClientGroupClients.findOne({
-                ClientGroupClientID: cgid
-            }).then(cgi=>{
-                if (cgi!==null) {
-                    return this.db.ClientGroups.findOne({
-                        ClientGroupID: cgi.ClientGroupID,
-                        ClientID: c
-                    }).then(cg=>{
-                        if (cg!==null) {
-                            return this.db.ClientGroupClients.update({
-                                ClientGroupClientID: cgid
-                            },{
-                                PhoneNumber: gphone,
-                                EmailAddress: gemail,
-                                Name: gname
-                            }).then(r=>{
-                                return "OK";
-                            })
-                        }
-                        else {
-                            return "Invalid Operation";
-                        }
-                    })
-                }
-                else {
-                    return "Invalid Operation";
-                }
-            })
+            var ph = this.objs.utilityobj.standardizePhone(gphone);
+            if (ph!=="NotOK") {
+
+                return this.db.ClientGroupClients.findOne({
+                    ClientGroupClientID: cgid
+                }).then(cgi=>{
+                    if (cgi!==null) {
+                        return this.db.ClientGroups.findOne({
+                            ClientGroupID: cgi.ClientGroupID,
+                            ClientID: c
+                        }).then(cg=>{
+                            if (cg!==null) {
+                                return this.db.ClientGroupClients.update({
+                                    ClientGroupClientID: cgid
+                                },{
+                                    PhoneNumber: ph,
+                                    EmailAddress: gemail,
+                                    Name: gname
+                                }).then(r=>{
+                                    return "OK";
+                                })
+                            }
+                            else {
+                                return "Invalid Operation";
+                            }
+                        })
+                    }
+                    else {
+                        return "Invalid Operation";
+                    }
+                })
+            }
         });
     }
 
@@ -810,7 +817,7 @@ class client {
         }
         else if (email!==null) {
             conditional.push({
-                "EmailAddress": email
+                "EmailAddress": email.toLowerCase()
             })
         }
         else {
@@ -975,7 +982,7 @@ class client {
                             return this.db.ClientEmailVerification.insert({
                                 ClientEmailVerificationID: this.objs.uuidv4(),
                                 ClientID: c,
-                                EmailAddress: emailaddress,
+                                EmailAddress: emailaddress.toLowerCase(),
                                 Verification: this.objs.utilityobj.createHash(64)
                             }).then(r=> {
                                 this.objs.messageobj.sendEmail(emailaddress,"Schedule Us Email Verification","Click https://"+this.objs.envURL+"/verifyemail?c="+c+"&v="+r.Verification+" to verify your email address");

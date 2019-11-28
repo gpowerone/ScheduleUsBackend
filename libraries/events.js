@@ -149,15 +149,15 @@ class events {
 
     async addGuest(eventID, guest, isOrg, clientID) {
 
-        if (guest.gemail!==null && guest.gemail.length>0 && guest.gemail!=="Not Specified" && this.objs.utilityobj.verifyEmail(guest.gemail)!=="OK") {
+        if (guest.gemail!==null && guest.gemail.length>0 && this.objs.utilityobj.verifyEmail(guest.gemail)!=="OK") {
             return new Promise(function (resolve, reject) { resolve(null); });
         }
 
-        if (guest.gphone!==null && guest.gphone.length>0 && guest.gphone!=="Not Specified" && this.objs.utilityobj.verifyPhone(guest.gphone)!=="OK") {
+        if (guest.gphone!==null && guest.gphone.length>0 && this.objs.utilityobj.verifyPhone(guest.gphone)!=="OK") {
             return new Promise(function (resolve, reject) { resolve(null); });
         }
 
-        if (((guest.gemail===null||guest.gemail.length===0) && (guest.gphone===null||guest.gphone.length===0)) || (guest.gemail==="Not Specified" && guest.gphone==="Not Specified")) {
+        if (((guest.gemail===null||guest.gemail.length===0) && (guest.gphone===null||guest.gphone.length===0))) {
             return new Promise(function (resolve, reject) { resolve(null); });
         }
 
@@ -256,7 +256,7 @@ class events {
                 }).then(p=> {
 
                     
-                    if (egobj.EmailAddress===null || egobj.EmailAddress.length===0 || egobj.EmailAddress==="Not Specified") {
+                    if (egobj.EmailAddress===null || egobj.EmailAddress.length===0) {
                         var msg= eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
                         esobj.Location+" "+addr+"on "+
                         this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate);
@@ -331,23 +331,17 @@ class events {
 
        return await this.objs.sessionobj.verify().then(c=> {
             return this.objs.clientobj.getClientByID(c).then(cli=> {
+
+                if (cli===null) {
+                    return "An account is required to create events"; 
+                }
+
                 return this.db.OptOut.find().then(optouts=>{
                     return this.db.EmailOptOut.find().then(emailoptouts=>{
-
-                        if (cli===null) {
-                            return "An account is required to create events"; 
-                        }
-        
+    
                         var edate = null; 
                         var sdate = new Date(req.body.EventDate).getTime()+(parseInt(req.body.UTCOffset)*60*1000);
-                        var del=0;
-                        if (cli.IsPro) {
-                            del=2;
-                        }
-                        if (cli.IsPremium) {
-                            del=1;
-                        }
-
+           
                         if (req.body.EndDate!==null) {
                             edate = new Date(req.body.EndDate).getTime()+(parseInt(req.body.UTCOffset)*60*1000);
                         }
@@ -382,7 +376,7 @@ class events {
                                 MustApproveDiffTime: req.body.MustApproveDiffTime,
                                 EventDate: sdate,
                                 EndDate: edate,
-                                Deletable: del
+                                Deletable: cli.IsPro?2:(cli.IsPremium?1:0)
                             }).then(r=> {
                                 if (r!==null && typeof(r.EventID)!==undefined) {
                             
@@ -525,15 +519,31 @@ class events {
                         var self=this;
                         this.objs.geocoder.find(req.body.Geocode, function(err,r) {
             
-                            self.objs.eventsobj.locationFinder(req.body.Place, [r[0].location.lat,r[0].location.lng], req.body.Keyword, function(error,response) {
-                                response.foundCoords=[r[0].location.lat,r[0].location.lng];
-                                res.send({ status: 200, message:JSON.stringify(response) })
-                            });
+                            if (err!==null) {
+
+                                self.objs.eventsobj.locationFinder(req.body.Place, [r[0].location.lat,r[0].location.lng], req.body.Keyword, function(error,response) {
+                                    if (error!==null) {
+                                        response.foundCoords=[r[0].location.lat,r[0].location.lng];
+                                        res.send({ status: 200, message:JSON.stringify(response) })
+                                    }
+                                    else {
+                                        res.send({ status: 500, message:"Could not find a location"});
+                                    }
+                                });
+                            }
+                            else {
+                                res.send({ status: 500, message:"Could not find a location"});
+                            }
                         });
                     }
                     else {
                         this.objs.eventsobj.locationFinder(req.body.Place, req.body.Coords, req.body.Keyword, function(error,response) {
-                            res.send({ status: 200, message:JSON.stringify(response) })
+                            if (error!==null) {
+                                res.send({ status: 200, message:JSON.stringify(response) })
+                            }
+                            else {
+                                res.send({ status: 500, message:"Could not find a location"});
+                            }
                         });
                     }
                 })
@@ -690,7 +700,7 @@ class events {
                                 }
                             }
 
-                            if (r.IsOwner) {
+                            if (r.IsOwner && r.GuestListVisible===true) {
                                 for(var g=0; g<eg.length; g++) {
                                     r.Guests[g].PhoneNumber=eg[g].PhoneNumber;
                                     r.Guests[g].EmailAddress=eg[g].EmailAddress;
@@ -937,7 +947,7 @@ class events {
     }
 
     locationFinder(query, coords, keyword, resp) {
-        if (keyword===null) {
+        if (keyword===null || keyword.length===0) {
             this.objs.googleplaces.placeSearch({
                 location:coords,
                 rankby:'distance',
@@ -1028,7 +1038,7 @@ class events {
                         return this.db.EventGuests.destroy({
                             EventGuestID: theguest.EventGuestID
                         }).then(qr=>{
-                            if (phone===null || phone==="Not Specified" || phone.length===0) { 
+                            if (phone===null || phone.length===0) { 
                                 this.db.Partials.insert({
                                     FromPhone:null,
                                     PartialID: this.objs.uuidv4(),
@@ -1567,25 +1577,29 @@ class events {
         if (guest.gname.length<1 || guest.gname.length>128) {
             return "Invalid attendee name";
         }
-        if (guest.gphone!=null && guest.gphone.length>0 && guest.gphone!=="Not Specified" && guest.gphone!==null) {
+        if (guest.gphone!==null && guest.gphone.length>0) {
             var vp = this.objs.utilityobj.verifyPhone(guest.gphone);
             if (vp!=="OK") {
                 return "An attendee has an invalid phone number"
             }
         }
-        if (guest.gemail!==null && guest.gemail===cli.EmailAddress) {
-            return "You cannot invite yourself";
+
+        if (typeof(cli)!=="undefined" && cli!==null) {
+            if (guest.gemail!==null && guest.gemail===cli.EmailAddress) {
+                return "You cannot invite yourself";
+            }
+            if (guest.gphone!==null && this.objs.utilityobj.standardizePhone(guest.gphone)===cli.PhoneNumber) {
+                return "You cannot invite yourself";
+            }
         }
-        if (guest.gphone!==null && this.objs.utilityobj.standardizePhone(guest.gphone)===cli.PhoneNumber) {
-            return "You cannot invite yourself";
-        }
-        if (guest.gemail!=null && guest.gemail.length>0 && guest.gemail!=="Not Specified" && guest.gemail!==null) {
+
+        if (guest.gemail!=null && guest.gemail.length>0 &&  guest.gemail!==null) {
             var ve = this.objs.utilityobj.verifyEmail(guest.gemail);
             if (ve!=="OK") {
                 return "An attendee has an invalid email address";
             }
         }
-        if ((guest.gemail===null||guest.gemail.length===0||guest.gemail==="Not Specified")&&(guest.gphone===null||guest.gphone.length===0||guest.gphone==="Not Specified")) {
+        if ((guest.gemail===null||guest.gemail.length===0)&&(guest.gphone===null||guest.gphone.length===0)) {
             return "An attendee does not have an email address or phone number"
         }
 

@@ -59,16 +59,23 @@ class pickforus {
         // If the event is after today then we need to add the rest of today
         var uTime=this.userTime.getTime();
 
+        // Watch out, chosen date can be null
         // If there are days, these are always added. 
-        if (chosenDate.d>0) { 
-            var tomorrow = new Date();
-            tomorrow.setHours(24,0,0,0);
-            uTime+=(tomorrow.getTime()-uTime-this.offset)+ ((chosenDate.d-1)*86400000) +(chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
+
+        try {
+            if (chosenDate.d>0) { 
+                var tomorrow = new Date();
+                tomorrow.setHours(24,0,0,0);
+                uTime+=(tomorrow.getTime()-uTime-this.offset)+ ((chosenDate.d-1)*86400000) +(chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
+            }
+            else {
+                var thour = (this.userTime.getUTCHours()*3600000) + (this.userTime.getUTCMinutes()*60000);
+                var chour = (chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
+                uTime+=(chour-thour);
+            }
         }
-        else {
-            var thour = (this.userTime.getUTCHours()*3600000) + (this.userTime.getUTCMinutes()*60000);
-            var chour = (chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
-            uTime+=(chour-thour);
+        catch(e) {
+            return null;
         }
 
         
@@ -315,7 +322,7 @@ class pickforus {
         }
 
         if (betterchoices.length>0) {
-            var n=Math.floor(Math.random()*betterchoices.length-1,0);
+            var n=Math.floor(Math.random() * Math.floor(betterchoices.length-1));
             return betterchoices[n];
         }
 
@@ -331,11 +338,11 @@ class pickforus {
         }
 
         if (betterchoices.length>0) {
-            var n=Math.floor(Math.random()*betterchoices.length-1,0);
+            var n=Math.floor(Math.random() * Math.floor(betterchoices.length-1));
             return betterchoices[n];
         }
         if (choices.length>0) {
-            var n=Math.floor(Math.random()*choices.length-1,0);
+            var n=Math.floor(Math.random() * Math.floor(choices.length-1));
             return choices[n];
         }
 
@@ -352,11 +359,11 @@ class pickforus {
         }
 
         if (betterchoices.length>0) {
-            var n=Math.floor(Math.random()*betterchoices.length-1,0);
+            var n=Math.floor(Math.random() * Math.floor(betterchoices.length-1));
             return betterchoices[n];
         }
         if (choices.length>0) {
-            var n=Math.floor(Math.random()*choices.length-1,0);
+            var n=Math.floor(Math.random() * Math.floor(choices.length-1));
             return choices[n];
         }
 
@@ -552,6 +559,7 @@ class pickforus {
     limitDays(params) {
         // First, determine current day of week (day 0 day)
         var thisDay=this.userTime.getDay();
+
         this.buildDayChart(thisDay);
 
         if (params.Sundays!==true) {
@@ -581,6 +589,7 @@ class pickforus {
         if (params.Saturdays!==true) {
             this.removeDay(6);
         }
+
 
         var tempdays=this.days;
         this.days=[];
