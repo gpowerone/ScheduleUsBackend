@@ -57,7 +57,7 @@ class message {
                 Data: _subject
                }
               },
-            Source: 'users@schd.us'
+            Source: 'Schedule Us <users@schd.us>'
           };
 
         var sendPromise = new this.objs.aws.SES({apiVersion: '2010-12-01'}).sendEmail(params).promise();

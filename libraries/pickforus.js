@@ -234,71 +234,81 @@ class pickforus {
                 if (cli===null) {
                     return "You must be logged in to use Pick for Us";
                 }
-
-                /*
+  
                 if (cli.PFUSusage>=15) {
                     return "You have reached the maximum number of times you may use Pick for Us today. Please try again tomorrow.";
                 }
-                */
-
+    
                 return this.db.Clients.update({
                     ClientID: cli.ClientID
                 },{
                     PFUSusage: cli.PFUSusage+1
                 }).then(c=>{
    
-                    this.userTime = this.getDateFromOffset(params.Offset);
-                    return this.getCalendars(params.Users, params.Offset).then(calendardata=>{
-
-                        this.calendars=this.buildCalendarDates(calendardata);
-
-                        // This array will contain the available days to choose from
-                        this.days=[];
-
-                        // This array will include the preferred date times
-                        this.preferredtimes=[];
-
-                        // Determine all days from date ranges
-                        if (params.RequireToday===true) {
-                            this.days.push({d: 0, t:[]});
-                        }
-                        if (params.LSoon===true) {
-                            this.pushDays(1,3);
-                        }
-                        if (params.LWeek===true) {
-                            this.pushDays(4,7);
-                        }
-                        if (params.LMonth===true) {
-                            this.pushDays(8,30);
-                        }
-                        if (params.LMonthPlus===true) {
-                            this.pushDays(31,90);
-                        }
-
-                        // Now limit days by days of week
-                        this.limitDays(params);
-
-                        // Create available date-time region pairs
-                        if (this.createDateTimes(params))
-                        {
-                            // Create preferred times if possible
-                            this.buildPreferredTimes(params);
-
-                            if (this.preferredtimes.length>0) {
-                                return this.buildDateString(this.findFinalDate(true));
-                            }
-                            else {
-                                return this.buildDateString(this.findFinalDate(false));
-                            }
-                        }
-                        else {
-                            return null;
-                        }
-                    })
+                    return this.doWorkPFUS(params);
                                   
                 });
             });
         });
+    }
+
+    async doTokenPFUS(params) {
+        return this.doWorkPFUS(params);
+    }
+
+    async doWorkPFUS(params) {
+
+        this.userTime = this.getDateFromOffset(params.Offset);
+        return this.getCalendars(params.Users, params.Offset).then(calendardata=>{
+
+            this.calendars=this.buildCalendarDates(calendardata);
+
+            // This array will contain the available days to choose from
+            this.days=[];
+
+            // This array will include the preferred date times
+            this.preferredtimes=[];
+
+            // Determine all days from date ranges
+            if (params.RequireToday===true) {
+                this.days.push({d: 0, t:[]});
+            }
+            if (params.LSoon===true) {
+                this.pushDays(1,3);
+            }
+            if (params.LWeek===true) {
+                this.pushDays(4,7);
+            }
+            if (params.LMonth===true) {
+                this.pushDays(8,30);
+            }
+            if (params.LMonthPlus===true) {
+                this.pushDays(31,90);
+            }
+            if (params.CustomRange===true) {
+                this.pushDays(params.CR1, params.CR2);
+            }
+
+            // Now limit days by days of week
+            this.limitDays(params);
+
+            // Create available date-time region pairs
+            if (this.createDateTimes(params))
+            {
+                // Create preferred times if possible
+                this.buildPreferredTimes(params);
+
+                if (this.preferredtimes.length>0) {
+                    return this.buildDateString(this.findFinalDate(true));
+                }
+                else {
+                    return this.buildDateString(this.findFinalDate(false));
+                }
+            }
+            else {
+                return null;
+            }
+        })
     }
 
     findFinalDate(usePreferred) {
@@ -374,53 +384,65 @@ class pickforus {
     // performs google calendar lookups
     getGoogleCalendar(refreshToken,clientID) {
 
-        try {
-          
-            const oauth2Client = new this.objs.google.auth.OAuth2(
-                "801199894294-iei4roo6p67hitq9sc2tat5ft24qfakt.apps.googleusercontent.com", 
-                "WOihpgSDdZkA81FS8mF_RxmS", 
-                "https://stage.schd.us/googcalendar" 
-            );
-            
-            oauth2Client.setCredentials({
-            refresh_token:
-                refreshToken
-            });
-            
-            const calendar = this.objs.google.calendar({version: 'v3', auth: oauth2Client});
+        if (typeof(clientID)==="undefined" || clientID===null) {
+            return new Promise(function (resolve, reject) { resolve([]); });
+        }
 
-            return calendar.calendarList.list({}).then(res => {
+        const oauth2Client = new this.objs.google.auth.OAuth2(
+            "801199894294-iei4roo6p67hitq9sc2tat5ft24qfakt.apps.googleusercontent.com", 
+            "WOihpgSDdZkA81FS8mF_RxmS", 
+            "https://stage.schd.us/googcalendar" 
+        );
+        
+        oauth2Client.setCredentials({
+        refresh_token:
+            refreshToken
+        });
+        
+        const calendar = this.objs.google.calendar({version: 'v3', auth: oauth2Client});
 
-                for(var c=0; c<res.data.items.length; c++) {
-                    var cal = res.data.items[c];
-                    if (cal.id!=='en.usa#holiday@group.v.calendar.google.com' && cal.id!=='addressbook#contacts@group.v.calendar.google.com')
-                    {
-                        return calendar.events.list({
-                            'calendarId': cal.id,
-                            'timeMin': (new Date()).toISOString(),
-                            'showDeleted': false,
-                            'singleEvents': true,
-                            'orderBy': 'startTime'
-                        }).then(function(response) {
-                            var events = response.data.items;
-                            var calItems=[];
-                            for(var e=0; e<events.length; e++) {
-                                calItems.push([events[e].start.dateTime, events[e].end.dateTime]);
-                            }
-                            return calItems;
-                        });
-                    }
-                    else {
-                        return null;
-                    }
+        var cliID=clientID;
+
+        return calendar.calendarList.list({}).then(res => {
+
+            for(var c=0; c<res.data.items.length; c++) {
+                var cal = res.data.items[c];
+                if (cal.id!=='en.usa#holiday@group.v.calendar.google.com' && cal.id!=='addressbook#contacts@group.v.calendar.google.com')
+                {
+                    return calendar.events.list({
+                        'calendarId': cal.id,
+                        'timeMin': (new Date()).toISOString(),
+                        'showDeleted': false,
+                        'singleEvents': true,
+                        'orderBy': 'startTime'
+                    }).then(function(response) {
+                        var events = response.data.items;
+                        var calItems=[];
+                        for(var e=0; e<events.length; e++) {
+                            calItems.push([events[e].start.dateTime, events[e].end.dateTime]);
+                        }
+                        return calItems;
+                    });
                 }
-            
+                else {
+                    return [];
+                }
+            }
+        
+        }).catch(err=>{
+            return this.db.ClientCalendar.destroy({
+                ClientID: cliID,
+                CalendarType: 0
+            }).then(p=>{
+                return this.objs.messageobj.addToQueue(clientID, "Could not access your calendar. Please re-integrate your calendar on the My Account page").then(q=>{
+                    return [];
+                })
+                
             })
-        }
-        catch(e) {
-            this.objs.messageobj.addToQueue(clientID, "Could not access your calendar. Please re-integrate your calendar on the My Account page");
-            return null;
-        }
+            
+        })
+    
+      
         
     }
 
@@ -466,13 +488,18 @@ class pickforus {
                     }
                 }
                 
-                return this.getCalendarRecur(calendarTokens, filledCalendars, clientIDs);
+                if (clientIDs.length>0) {
+                    return this.getCalendarRecur(calendarTokens, filledCalendars, clientIDs);
+                }
+                else {
+                    return [];
+                }
 
             })
         }
         else {
             return new Promise(function (resolve, reject) {
-                resolve(null);
+                resolve([]);
             });
         }
         

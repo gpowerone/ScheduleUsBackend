@@ -23,6 +23,8 @@ const jimp = require('jimp');
 const cfrontinvalidate = require('aws-cloudfront-invalidate')
 const {OAuth2Client} = require('google-auth-library');
 const {google} = require('googleapis');
+const helm = require('helmet');
+const rssparser = require('rss-parser');
 
 const dbConfig = config.get('ScheduleUs.dbConfig');
 const twConfig = config.get('ScheduleUs.twilio');
@@ -50,7 +52,7 @@ massive({
     clientobj: new clientcls(db, rcConfig),
     eventsobj: new eventscls(db),
     pickobj: new pickforuscls(db),
-    messageobj: new messagecls("+12036354194", new twilio(twConfig.sid, twConfig.token)),
+    messageobj: new messagecls("+12036354194", new twilio(twConfig.sid, twConfig.token), db),
     request: request,
     bcrypt:bcrypt,
     uuidv4: uuidv4,
@@ -82,22 +84,57 @@ massive({
       if (req.body.ClientID!==null && req.body.SessionID!==null && req.body.SessionLong!==null) {
          objs.sessionobj.setSession(req.body.ClientID, req.body.SessionID, req.body.SessionLong);
       }
+      else {
+         objs.sessionobj.setSession(null,null,null);
+      }
     }
-    catch(e) {}
+    catch(e) {
+       objs.sessionobj.setSession(null,null,null);
+    }
 
     next()
   }
 
-	var app = express()
-	app.use(bodyParser.json())
+  var app = express()
+  
+	app.use(bodyParser.json({
+    verify: function(req,res,buf) {
+      if (req.originalUrl.startsWith('/checkoutconfirm') || req.originalUrl.startsWith('/charge')) {
+          req.rawBody = buf.toString()
+      }
+    }
+  }))
+  app.use(helm())
   app.use(cors())
   app.use(sessionHook);
   app.use(function(req, res, next) {
-    res.header('Access-Control-Allow-Origin', '*')
-    res.header('Access-Control-Allow-Credentials', true)
-    res.header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept')
+    var host = req.get('host');
+    if (host==="localhost" || host==="api.schd.us") {
+        if (host==="localhost") {
+            host+=":8000";
+        }
+        if (host==="api.schd.us") {
+            host="stage.schd.us"
+        }
+
+        res.header('Access-Control-Allow-Origin', "https://"+host)
+        res.header('Access-Control-Allow-Credentials', true)
+        res.header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+        res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept')
+    }
     next()
+  })
+
+
+  app.post('/acceptchanges', function(req, res) {
+      objs.eventsobj.acceptChanges(req.body.EventID).then(r=>{
+           if (r==="OK") {
+              res.send({ status: 200, message:"OK" });
+           }
+           else {
+              res.send({ status: 500, message:r });
+           }
+      })
   })
 
   app.post('/accountrecovery', function(req, res) {
@@ -256,20 +293,23 @@ app.post('/addguest', function(req, res) {
        if (vg==="OK") {
          objs.sessionobj.verify().then(c=> {
             objs.eventsobj.getEventById(req.body.EventID).then(e=> {
-                if ((e.CreatorID===c || e.GuestsCanBringOthers===true) && e.ActionReq>0) {
 
-                  if (e.Guests.length+1>e.EventMaxCapacity) {
-                       res.send({ status: 500, message:"This event is at capacity and cannot accept any additional RSVPs" });
-                       return;
-                  }
 
+                if ((e.CreatorID===c || e.GuestsCanBringOthers===true) && e.ActionReq>0 && e.EventDate>=new Date().getTime()) {
+
+                  
                   for(var eg=0; eg<e.Guests.length; eg++) {
                     
-                    if ((guestobj.gphone!==null && guestobj.gphone.length>0 && guestobj.gphone!=="Not Specified" && e.Guests[eg].PhoneNumber===guestobj.gphone) || 
-                        (guestobj.gemail!==null && guestobj.gemail.length>0 && guestobj.gemail!=="Not Specified" && e.Guests[eg].EmailAddress===guestobj.gemail)) {
+                    if ((guestobj.gphone!==null && guestobj.gphone.length>0 && e.Guests[eg].PhoneNumber===guestobj.gphone) || 
+                        (guestobj.gemail!==null && guestobj.gemail.length>0 && e.Guests[eg].EmailAddress===guestobj.gemail)) {
                        res.send({ status: 500, message:"This person has already been added to the event" });
                        return;
                     }
+                  }
+
+                  if (e.Guests.length+1>e.EventMaxCapacity) {
+                    res.send({ status: 500, message:"This event is at capacity and cannot accept any additional RSVPs" });
+                    return;
                   }
 
                   objs.eventsobj.addGuest(req.body.EventID, guestobj, false, e.CreatorID===c?null:c).then(r=> {
@@ -297,6 +337,7 @@ app.post('/addguest', function(req, res) {
       }
     }
     catch(e) {
+      console.log(e)
      res.send({ status: 500, message:"An unexpected error occurred"});
     }
  })
@@ -317,6 +358,46 @@ app.post('/cancelevent', function(req, res) {
   } 
 })
 
+app.post('/cancelsubscription', function(req, res) {
+  objs.sessionobj.verify().then(c=> {
+      objs.clientobj.getClientByID(c).then(cli=> {
+
+        if (cli.PaymentID!==null) {
+          stripe.subscriptions.list(
+            { customer: cli.PaymentID },
+            function(err, subscriptions) {
+                if (subscriptions.data.length>0) {
+
+                    for (var y=0; y<subscriptions.data.length; y++) {
+                        if (subscriptions.data[y].canceled_at===null) {
+                          var sub = subscriptions.data[y];
+
+                          stripe.subscriptions.del(
+                            sub.id,
+                            function(err, confirmation) {
+                                db.Clients.update({
+                                    ClientID: cli.ClientID
+                                },{
+                                    SubTerminationDate: sub.current_period_end
+                                })
+                                res.send({status:200, message:"OK"});
+                            }
+                          );
+                        }
+                    }
+                }
+                else {
+                  res.send({status:500, message:"Invalid Operation"});
+                }
+            });
+        }
+        else {
+          res.send({status:500, message:"Invalid Operation"});
+        }
+      })
+  })
+})
+
 app.post('/changenumber', function(req, res) {
     try {
       objs.clientobj.changeNumber(req.body.Passwd, req.body.PhoneNumber).then(r=> {
@@ -335,7 +416,7 @@ app.post('/changenumber', function(req, res) {
 
   app.post('/changepassword', function(req, res) {
       try {
-         var msg = objs.clientobj.verify("test","test","999-999-9999",req.body.passwd);
+         var msg = objs.clientobj.verify("test","test","999-999-9999",req.body.passwd,"1");
          if (msg==="OK")
          {
             objs.bcrypt.genSalt(10, function(err, psalt) {
@@ -360,28 +441,164 @@ app.post('/changenumber', function(req, res) {
       }
   })
 
-  app.post('/checkoutconfirm', function(req, res) {
-      let event=null;
+  app.post('/charge', (request, response)=>{
+      const sig = request.headers['stripe-signature'];
+
+      let event;
+    
       try {
-          event = stripe.webhooks.constructEvent(
-            req.rawBody,
-            req.headers["stripe-signature"],
-            stripeConfig.checkout_confirm
-          );
-      } catch (err) {
-          return res.sendStatus(400);
-      }
+        event = stripe.webhooks.constructEvent(request.rawBody, sig, stripeConfig.charge);
 
-      if (event!==null) {
-         data = event.data;
-         console.log(data);
+        db.Clients.findOne({
+          PaymentID: event.data.object.customer
+        }).then(c=>{
 
-         res.sendStatus(200);
+            if (c===null) {
+                response.status(400).send("Client not found");
+            }
+            else {
+
+                if (event.type==="charge.succeeded") {
+
+                    var amt=""; 
+                    var desc="";
+
+                    if (event.data.object.amount===1197) {
+                        amt="11.97";
+                        desc="3 Months Schedule Us Premium";
+                    }
+                    else if (event.data.object.amount===999) {
+                        amt="9.99";
+                        desc="1 Month Schedule Us Pro";
+                    }
+                    else if (event.data.object.amount===399) {
+                        amt="3.99";
+                        desc="1 Month Schedule Us Premium";
+                    }
+                    else {
+                        amt="29.97";
+                        desc="3 Months Schedule Us Pro";
+                    }
+
+                    db.ClientOrderHistory.insert({
+                        ClientOrderHistoryID: objs.uuidv4(),
+                        ClientID: c.ClientID,
+                        OrderDate: new Date().getTime(),
+                        Amount: amt,
+                        Description: desc
+                    })       
+                    
+                    db.Clients.update({
+                      ClientID: c.ClientID
+                    },{
+                        SubTerminationDate: null
+                    })
+                }
+                if (event.type==="charge.failed") {
+                    db.ClientOrderHistory.insert({
+                      ClientOrderHistoryID: objs.uuidv4(),
+                      ClientID: c.ClientID,
+                      OrderDate: new Date().getTime(),
+                      Amount: "0.00",
+                      Description: "Subscription Payment Failed"
+                  })
+
+                  var endDate = (new Date().getTime())/1000;
+                  endDate+=252900;
+
+                  db.Clients.update({
+                      ClientID: c.ClientID
+                  },{
+                      SubTerminationDate: endDate
+                  })
+
+                  objs.messageobj.addToQueue(c.ClientID, "Schedule Us Payment Failed. Please update your payment information on the My Account page");
+                  objs.messageobj.sendMessage(c.PhoneNumber, "Schedule Us Payment Failed. Your access to Schedule Us Premium/Pro will be cut off in three days. Please update your payment method on the My Account page");
+               }
+
+               // Return a response to acknowledge receipt of the event
+               response.json({received: true});
+            }
+
+        });
+
       }
-      else {
-         res.sendStatus(400);
+      catch(err) {
+         response.status(400).send(`Webhook Error: ${err.message}`);
       }
   })
+
+  app.post('/checkoutconfirm', (request, response) => {
+    const sig = request.headers['stripe-signature'];
+
+    let event;
+  
+    try {
+      event = stripe.webhooks.constructEvent(request.rawBody, sig, stripeConfig.checkout_confirm);
+
+      if (event.type==="checkout.session.completed") {
+
+          var sub=event.data.object.subscription; 
+
+          stripe.subscriptions.retrieve(sub, function(error, subscription) {
+
+              if (subscription!==null) {
+                  db.Clients.findOne({
+                      PaymentID: event.data.object.customer
+                  }).then(c=>{
+                      var isPro=false;
+                      var isPremium=false;
+                      if (subscription.plan.id==="plan_G9Hls9FqgtFjT7") {
+                            isPremium=true;
+                      }
+                      if (subscription.plan.id==="plan_G9HmWLmLGbPe6m") {
+                            isPro=true;
+                      }
+                      db.Clients.update({
+                          ClientID: c.ClientID
+                      },{
+                            IsPro: isPro,
+                            IsPremium: isPremium,
+                            SubTerminationDate: null
+                      })
+                    
+                      db.EventGuests.find({
+                           ClientID: c.ClientID
+                      }).then(egs=>{
+                          for(var x=0; x<egs.length; x++) {
+                              db.EventGuests.update({
+                                  EventGuestID: egs[x].EventGuestID
+                              },{
+                                  Flair: isPremium===true?1:2
+                              })
+                          }
+                      })
+                      db.Events.find({
+                          CreatorID: c.ClientID
+                      }).then(es=>{
+                          for(var x=0; x<es.length; x++) {
+                             db.Events.update({
+                                 EventID: es[x].EventID
+                             },{
+                                 Deletable: isPremium===true?1:2
+                             })
+                          }
+                      })
+                  })
+              }
+          })
+       
+      }
+
+      // Return a response to acknowledge receipt of the event
+      response.json({received: true});
+    }
+    catch (err) {
+      response.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    
+});
 
   app.post('/contact', function(req, res) {
       try {
@@ -405,7 +622,7 @@ app.post('/changenumber', function(req, res) {
         objs.clientobj.verifyCaptcha(req.body.recaptchaToken).then(re => {
            if (re==="OK") {
 
-            var msg = objs.clientobj.verify(req.body.FirstName,req.body.LastName,req.body.Phone,req.body.Passwd);
+            var msg = objs.clientobj.verify(req.body.FirstName,req.body.LastName,req.body.Phone,req.body.Passwd,req.body.SecAnswer);
             if (msg==="OK")
             {
                 var sPhone=objs.utilityobj.standardizePhone(req.body.Phone);
@@ -462,7 +679,7 @@ app.post('/changenumber', function(req, res) {
   app.post('/createcheckout', function(req, res) {
       objs.sessionobj.verify().then(r=> {
         if (r!==null) {
-            objs.clientobj.getClientByID(req.body.ClientID).then(c => {
+            objs.clientobj.getClientByID(r).then(c => {
                 const { planId } = req.body;
 
                 if (c.PaymentID===null) {
@@ -541,6 +758,12 @@ app.post('/changenumber', function(req, res) {
     catch(e) {
       res.send({ status: 500, message:"An unexpected error occurred"});
     }
+  })
+
+  app.post('/dismissclientqueue', function(req, res) {
+      objs.messageobj.removeFromQueue(req.body.ClientQueueID).then(r=>{
+        res.send({ status: 200, message:"OK" });
+      })
   })
 
   app.post('/doemailoptout', function(req, res) {
@@ -683,6 +906,17 @@ app.post('/changenumber', function(req, res) {
       })
   })
 
+  app.post('/getclientqueue', function(req, res) {
+      objs.messageobj.getClientQueue().then(c=>{
+          if (c===null) {
+            res.send({ status: 500, message:"An unexpected error occurred"});
+          }
+          else {
+            res.send({ status: 200, message:c}); 
+          }
+      })
+  })
+
   app.post('/getclientorderhistory', function (req, res) {
       objs.clientobj.getOrderHistoryForClient().then(r=>{
           if (r!==null) {
@@ -696,7 +930,7 @@ app.post('/changenumber', function(req, res) {
 
   app.post('/getbyphoneoremail', function(req, res) {
       try {
-          if (req.body.PhoneNumber!==null && req.body.PhoneNumber!=="Not Specified") {
+          if (req.body.PhoneNumber!==null) {
 
             var sPhone = objs.utilityobj.standardizePhone(req.body.PhoneNumber);
             if (sPhone!=="NotOK") {
@@ -714,7 +948,7 @@ app.post('/changenumber', function(req, res) {
               res.send({ status: 500, message:"An unexpected error occurred"}); 
             }
           }
-          else if (req.body.EmailAddress!==null && req.body.EmailAddress!=="Not Specified") {
+          else if (req.body.EmailAddress!==null) {
             objs.clientobj.getClientByEmail(req.body.EmailAddress).then(c=> {
               if (c!==null) {
                 res.send({ status: 200, message:c.ClientID}); 
@@ -786,6 +1020,19 @@ app.post('/changenumber', function(req, res) {
     }
   })
 
+  app.post('/getfeed', function(req, res) {
+      let parser = new rssparser();
+      
+      try {
+        parser.parseURL('https://schdus.blogspot.com/feeds/posts/default?alt=rss').then(feed=>{
+          res.send({ status: 200, message:JSON.stringify(feed)})
+        });
+      }
+      catch(e) {
+        res.send({ status: 500, message: "NotOK"});
+      }
+  });
+
   app.post('/getgroupsforclient', function(req, res) {
      try {
        objs.clientobj.getGroupsForClient().then(cgs=>{
@@ -811,6 +1058,51 @@ app.post('/changenumber', function(req, res) {
     catch(e) {
       res.send({ status: 500, message:"An unexpected error occurred"});
     }
+  })
+
+  app.post('/getnextpaymentdate', function(req, res) {
+    objs.sessionobj.verify().then(c=> {
+      objs.clientobj.getClientByID(c).then(cli=> {
+
+        if (cli===null) {
+          res.send({status: 500, message:"Invalid Operation"})
+        }
+
+        if (cli.PaymentID!==null) {
+          stripe.subscriptions.list(
+            { customer: cli.PaymentID },
+            function(err, subscriptions) {
+
+                if (subscriptions!==null && subscriptions.data.length>0) {
+
+                    for (var y=0; y<subscriptions.data.length; y++) {
+                        if (subscriptions.data[y].canceled_at===null) {
+                          var sub = subscriptions.data[y];
+                          res.send({status: 200, message:sub.current_period_end})
+                        }
+                    }
+                }
+                else {
+                  res.send({status: 500, message:"No Subscriptions"})
+                }
+              })
+          }
+          else {
+            res.send({status: 500, message:"Invalid Operation"})
+          }
+        })
+      })
+  })
+
+  app.post('/getrecurringinfo', function(req,res) {
+      objs.eventsobj.getRecurringInfo(req.body.EventID).then(q=>{
+         if (q===null) {
+            res.send({ status: 500, message:"An unexpected error occurred"});
+         }
+         else {
+            res.send({ status: 200, message:xss(JSON.stringify(q))});
+         }
+      })
   })
 
   app.post('/getsuggestedlocations', function(req, res) {
@@ -906,6 +1198,33 @@ app.post('/changenumber', function(req, res) {
          res.send({ status: 500, message:"An unexpected error occurred"});
       }
   });
+
+  app.post('/pickforus_spc', function(req,res) {
+     try {
+       if (req.body.t==="30bkYlYaIMgSVusiV2HtuOzvyk9QfuigOOVSJkGwPoD1WASHG1ErOAv23NCg2Lfz") {
+           objs.pickobj.doTokenPFUS(req.body).then(r=>{
+              res.send({ status: 200, message:JSON.stringify(r)});
+           })
+       }
+       else {
+           res.send({ status: 500, message:"An unexpected error occurred"});
+       }
+     }
+     catch (e) {
+       res.send({ status: 500, message:"An unexpected error occurred"});
+     }
+  })
+
+  app.post('/rejectchanges', function(req, res) {
+    objs.eventsobj.rejectChanges(req.body.EventID).then(r=>{
+         if (r==="OK") {
+            res.send({ status: 200, message:"OK" });
+         }
+         else {
+            res.send({ status: 500, message:r });
+         }
+    })
+ })
 
   app.post('/removeattendee', function(req, res) {
       try {
@@ -1068,6 +1387,54 @@ app.post('/changenumber', function(req, res) {
     }
   })
 
+  app.post('/updatesubscription', function(req, res) {
+    objs.sessionobj.verify().then(c=> {
+      objs.clientobj.getClientByID(c).then(cli=> {
+
+        if (cli.PaymentID!==null) {
+          stripe.subscriptions.list(
+            { customer: cli.PaymentID },
+            function(err, subscriptions) {
+                if (subscriptions.data.length>0) {
+
+                    for (var y=0; y<subscriptions.data.length; y++) {
+                        if (subscriptions.data[y].canceled_at===null) {
+                          var sub = subscriptions.data[y];
+    
+                          stripe.checkout.sessions.create({
+                              payment_method_types: ['card'],
+                              mode: 'setup',
+                              setup_intent_data: {
+                                metadata: {
+                                  customer_id: cli.PaymentID,
+                                  subscription_id: sub.id,
+                                },
+                              },
+                              success_url: 'https://stage.schd.us/myaccount?upd=1',
+                              cancel_url: 'https://stage.schd.us/myaccount?upd=2',
+                          }).then(session=>{
+                              res.send({
+                                status: 200,
+                                sessionId: session.id
+                              });
+                          })
+                        }
+                      }
+                  }
+                  else {
+                    res.send({status:500, message:"Invalid Operation"})
+                  }
+                }               
+              )
+          }
+          else {
+                res.send({status:500, message:"Invalid Operation"})
+          }
+        })
+     })
+   
+  })
+
   app.post('/updatetime', function(req,res) {
     try {
       objs.eventsobj.verifyOwner(req.body.EventID).then(o=>{
@@ -1182,7 +1549,7 @@ app.post('/changenumber', function(req, res) {
   app.post('/verifygooglogin', function(req, res) {
       try {
         objs.clientobj.verifyGoogleLogin(req.body.Token, req.body.Phone, req.body.EmailAddress).then(r=> {
-            if (r==="OK"||r==="NEEDPHONE"||r[0]==="{") {
+            if (r==="OK"||r==="NEEDPHONE"||r[0]==="{"||r.length===36) {
               res.send({ status: 200, message:r });
             }        
             else {

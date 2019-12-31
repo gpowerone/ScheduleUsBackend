@@ -84,7 +84,7 @@ class events {
             EventID: eventID
         }).then(e=> {
 
-            if (e===null || e.ActionReq===0) {
+            if (e===null || e.ActionReq===9) {
                 return "Event not found";
             }
 
@@ -166,12 +166,18 @@ class events {
             phone=null;
         }
 
+        var cond;
+        if (phone===null) {
+            cond={EmailAddress: guest.gemail}
+        }
+        else {
+            cond={PhoneNumber: phone}
+        }
+
         if (clientID===null) {
-            return await this.db.Clients.findOne({
-                or: [
-                    {PhoneNumber: phone},
-                    {EmailAddress: guest.gemail}] 
-            }).then(cl=>{
+            return await this.db.Clients.findOne(
+                cond
+            ).then(cl=>{
                 var clid=null;
                 var fl=0;
                 if (cl!==null) {
@@ -195,6 +201,14 @@ class events {
                     ClientID: clid,
                     Flair: fl
                 }).then(r=> {
+
+                    this.db.EventLog.insert({
+                        EventLogID: this.objs.uuidv4(),
+                        EventID: r.EventID,
+                        OperationDate: Date.now(),
+                        Operation: "Added Guest "+r.GuestName+" "+r.PhoneNumber+" "+r.EmailAddress
+                    });
+
                     return r;
                 })
             })
@@ -224,6 +238,15 @@ class events {
                     ClientID: clientID,
                     Flair: fl
                 }).then(r=> {
+
+
+                    this.db.EventLog.insert({
+                        EventLogID: this.objs.uuidv4(),
+                        EventID: r.EventID,
+                        OperationDate: Date.now(),
+                        Operation: "Added Guest "+r.GuestName+" "+r.PhoneNumber+" "+r.EmailAddress
+                    });
+
                     return r;
                 })
             });
@@ -259,7 +282,7 @@ class events {
                     if (egobj.EmailAddress===null || egobj.EmailAddress.length===0) {
                         var msg= eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
                         esobj.Location+" "+addr+"on "+
-                        this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate);
+                        this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+". To opt out of messages from Schedule Us reply with OPTOUT."
 
 
                         this.db.Partials.insert({
@@ -275,7 +298,7 @@ class events {
                         var msg="<h3> Dear "+egobj.GuestName+",</h3>"+
                         "<p>"+eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
                         esobj.Location+" "+addr+" on "+
-                        this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+"</p>";
+                        this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+"</p><p>To opt out of messages from Schedule Us <a href='https://schd.us/optout'>click here</a>.</p>";
 
                         this.db.Partials.insert({
                             FromPhone: null,
@@ -292,33 +315,59 @@ class events {
     }
 
     async cancelEvent(eventID) {
+ 
         return await this.objs.sessionobj.verify().then(c=> {
+    
             return this.getEventById(eventID).then(e=>{
+
                 if (e.CreatorID===c && e.ActionReq===2) {
-                    for(var x=0; x<e.Guests; x++) {
-                        this.removeAttendee(eventID,e.Guests[x].PhoneNumber,e.Guests[x].EmailAddress);
-                    }
-                    for (var x=0; x<e.Schedules.length; x++) {
-                        this.db.EventSchedules.destroy({
-                            EventID: eventID
-                        })
-                    }
 
-                    var self=this;
-                    setTimeout(function() {
-                        self.db.Events.destroy({
-                            EventID: eventID
-                        })
-                    },2000)
+                    return this.db.Events.update({
+                         EventID: eventID
+                    }, {
+                         ActionReq: 9,
+                         IsRecurring: false
+                    }).then(q=>{
 
-                    return "OK";
-                    
+                        var schdid=null;
+                        for(var s=0; s<e.Schedules.length; s++) {
+                            if (e.Schedules[s].Status===0) {
+                                schdid=e.Schedules[s].EventScheduleID;
+                            }
+                        }
+
+                        if (schdid!==null) {
+
+                        
+                            for(var x=0; x<e.Guests.length; x++) {
+                                if (e.Guests[x].ClientID!==c) {
+                                     this.cancelEventDo(e,e.Guests[x],schdid);
+                                }                   
+                            }
+                        }
+                   
+                        return "OK";
+                    })
+        
                 }
                 else {
                     return "Invalid Operation";
                 }
             });
         })
+    }
+
+    cancelEventDo(e,tg,schdid) {
+
+        this.db.EventScheduleGuests.findOne({
+            EventScheduleID: schdid,
+            EventGuestID: tg.EventGuestID
+        }).then(esg=>{
+            
+            this.removeAttendeeMessage(e,tg.PhoneNumber,tg.EmailAddress,esg.PhoneID,
+            "<h3>Dear "+tg.GuestName+",</h3><p>"+e.EventName+" has been cancelled by "+e.CreatorName+".  Sorry :(</p><p style='color:#a80cba'><b>Schedule Us</b></p><p>schd.us</p>",
+            e.EventName+" has been cancelled by "+e.CreatorName+".  Sorry :(");
+        }) 
     }
 
     createEvHash() {
@@ -356,9 +405,7 @@ class events {
                                 EventID: this.objs.uuidv4(),
                                 EventName: req.body.EventName,
                                 Hash: this.createEvHash(),
-                                IsRecurring: req.body.EventIsRecurring,
                                 EventDescription: req.body.EventDescription,
-                                CreationDate: Date.now(),
                                 AllowReschedule: req.body.GuestsReschedule,
                                 AllowLocationChange:req.body.GuestsChangeLocation,
                                 ActionReq: 1,
@@ -376,20 +423,42 @@ class events {
                                 MustApproveDiffTime: req.body.MustApproveDiffTime,
                                 EventDate: sdate,
                                 EndDate: edate,
+                                IsRecurring: req.body.RecurringPackage.length>0,
                                 Deletable: cli.IsPro?2:(cli.IsPremium?1:0)
                             }).then(r=> {
                                 if (r!==null && typeof(r.EventID)!==undefined) {
                             
-                                    return this.db.Clients.update({
+                                    this.db.Clients.update({
                                         ClientID: cli.ClientID
                                     },{
                                         EventCnt: cli.EventCnt+1
-                                    }).then(c=> {
-                                        
-                                        return this.scheduleEvent(r.EventID, req.body, cli.PhoneNumber, sdate, edate, cli.ClientID).then(e=> {
-                                            return "?e="+r.Hash;
-                                        });                                
-                                    })
+                                    });
+
+                                    if (req.body.RecurringPackage.length>0) {
+                                        var rp = req.body.RecurringPackage[0];
+                                        this.db.EventRecurring.insert({
+                                            EventRecurringID: this.objs.uuidv4(),
+                                            EventID: r.EventID,
+                                            Frequency: rp.Frequency,
+                                            Ticks: rp.Frequency,
+                                            IsMonthly: rp.IsMonthly,
+                                            Week: rp.Week,
+                                            Day: rp.Day,
+                                            Time: rp.Time,
+                                            Offset: parseInt(req.body.UTCOffset)
+                                        });
+                                    }
+
+                                    this.db.EventLog.insert({
+                                        EventLogID: this.objs.uuidv4(),
+                                        EventID: r.EventID,
+                                        OperationDate: Date.now(),
+                                        Operation: "Created Event"
+                                    });
+
+                                    return this.scheduleEvent(r.EventID, req.body, cli.PhoneNumber, sdate, edate, cli.ClientID).then(e=> {
+                                        return "?e="+r.Hash;
+                                    });      
                                 
                                 }
                                 else {
@@ -519,9 +588,10 @@ class events {
                         var self=this;
                         this.objs.geocoder.find(req.body.Geocode, function(err,r) {
             
-                            if (err!==null) {
+                            if (err===null) {
 
                                 self.objs.eventsobj.locationFinder(req.body.Place, [r[0].location.lat,r[0].location.lng], req.body.Keyword, function(error,response) {
+                                    console.log(error);
                                     if (error!==null) {
                                         response.foundCoords=[r[0].location.lat,r[0].location.lng];
                                         res.send({ status: 200, message:JSON.stringify(response) })
@@ -538,7 +608,8 @@ class events {
                     }
                     else {
                         this.objs.eventsobj.locationFinder(req.body.Place, req.body.Coords, req.body.Keyword, function(error,response) {
-                            if (error!==null) {
+
+                            if (error===null) {
                                 res.send({ status: 200, message:JSON.stringify(response) })
                             }
                             else {
@@ -556,70 +627,72 @@ class events {
         return await this.db.EventScheduleGuests.find({
             EventScheduleID: eventscheduleid
         }).then(es=> {
-            if (es!==null) {
-                return this.db.Events.findOne({
-                    EventID: eventid
-                }).then(e=> {
+        
+            return this.db.Events.findOne({
+                EventID: eventid
+            }).then(e=> {
 
-                    if (e!==null && (e.ActionReq===1 || e.ActionReq===2)) {
+                if (e!==null && e.ActionReq===2) {
 
-                        var ESGID=null;
-                        var accptCnt=0;
+                    var ESGID=null;
+                    var accptCnt=0;
 
-                        for(var x=0; x<es.length; x++) {
-                
-                            if (es[x].EventGuestID===me) {
-                                ESGID=es[x].EventScheduleGuestID;
-                                break;
-                            }
-
-                            if (es[x].Acceptance!==null) {
-                                accptCnt++; 
-                            }
+                    for(var x=0; x<es.length; x++) {
+            
+                        if (es[x].EventGuestID===me) {
+                            ESGID=es[x].EventScheduleGuestID;
                         }
-                        if (ESGID!==null) {
-                            return this.db.EventScheduleGuests.update({                  
-                                EventScheduleGuestID: ESGID
-                            },{
-                                Acceptance: rsvp
-                            }).then(p=>{
-                                if (accptCnt===es.length-1) {
-                                    if (e.CreatorID!=="00000000-0000-0000-0000-000000000000") 
-                                    {  
-                                        return this.db.EventGuests.findOne({
-                                            ClientID: e.CreatorID
-                                        }).then(eg=> {
-                                            if (eg!==null) {
-                                                this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/event?e="+e.Hash+"&g="+eg.EventGuestID);
-                                            }
-                                            return "OK";
-                                        });
 
-                                    }                                  
-                                }                          
-                                else {
+                        if (es[x].Acceptance!==null) {
+                            accptCnt++; 
+                        }
+                    }
+
+                    if (ESGID!==null) {
+                        return this.db.EventScheduleGuests.update({                  
+                            EventScheduleGuestID: ESGID
+                        },{
+                            Acceptance: rsvp
+                        }).then(p=>{
+                            if (accptCnt===es.length-1) {
+                                     
+                                return this.db.EventGuests.findOne({
+                                    ClientID: e.CreatorID
+                                }).then(eg=> {
+                                    if (eg!==null) {
+                                        this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/event?e="+e.Hash+"&g="+eg.EventGuestID);
+                                    }
                                     return "OK";
-                                }
-                            })
-                        }
-                        else {
-                            return null;
-                        }
+                                });
+
+                                                                     
+                            }                          
+                            else {
+                                return "OK";
+                            }
+                        })
+                      
                     }
                     else {
                         return null;
                     }
 
-                })
-            }
-
-            return null;
+                }
+                else {
+                    return null;
+                }
+            });
+            
         })
     }
 
     async getEventByHash(hsh, me, imic) {
         return await this.db.Events.findOne({ 
-            Hash: hsh
+            Hash: hsh,
+            or: [
+                { ActionReq: 1 },
+                { ActionReq: 2 }
+            ]
         }).then(r=> {
             if (r!==null) {
    
@@ -631,7 +704,6 @@ class events {
                     ]
                 }).then(eg=> {
                    
-
                     return this.db.EventSchedules.find({
                         EventID: r.EventID,
                         Status: 0
@@ -708,6 +780,12 @@ class events {
                             }
 
                             if (r.GuestsCanBringOthers===true) {
+
+                                // don't allow a guest id if it isn't a valid one
+                                if (me!==null && me.length>0 && r.EGID===null) {
+                                    return null;
+                                }
+
                                 r.MoreAllowed=true;
                                 if (r.EventMaxCapacity<=r.Guests.length) {
                                     r.MoreAllowed=false;
@@ -804,7 +882,9 @@ class events {
         return await this.objs.sessionobj.verify().then(c=> {
             return this.objs.clientobj.getClientByID(c).then(cli=> {
                 return  this.db.Events.find({
-                    CreatorID: c
+                    CreatorID: c,
+                    or: [{ActionReq: 2},
+                         {ActionReq: 1}]
                 }).then(hosting=> {
   
                     var fc = {
@@ -837,7 +917,11 @@ class events {
                                 })
                             }
 
-                            return this.db.Events.find({or: vor}).then(participating=> {
+                            return this.db.Events.find({
+                                    and:[{or: vor}, 
+                                         {or: [{ActionReq: 2},
+                                         {ActionReq: 1}]} 
+                                    ]}).then(participating=> {
                             
                                 var part =[];
                                
@@ -946,6 +1030,14 @@ class events {
         })
     }
 
+    async getRecurringInfo(evid) {
+        return await this.db.EventRecurring.findOne({
+            EventID: evid
+        }).then(evr=>{
+            return evr;
+        })
+    }
+
     locationFinder(query, coords, keyword, resp) {
         if (keyword===null || keyword.length===0) {
             this.objs.googleplaces.placeSearch({
@@ -1038,46 +1130,63 @@ class events {
                         return this.db.EventGuests.destroy({
                             EventGuestID: theguest.EventGuestID
                         }).then(qr=>{
-                            if (phone===null || phone.length===0) { 
-                                this.db.Partials.insert({
-                                    FromPhone:null,
-                                    PartialID: this.objs.uuidv4(),
-                                    PhoneNumber:"",
-                                    EmailAddress: email,
-                                    Message: "<h3>Dear "+theguest.GuestName+",</h3><p>You have been uninvited from "+e.EventName+" by "+e.CreatorName+". The event may have been cancelled. Sorry :(</p>",
-                                    Subject: "Uninvited From "+e.EventName
-                                })
 
-                                return "OK";
-                            }
-                            else {
-                                return this.db.PhoneNumbers.findOne({
-                                    PhoneID: esg.PhoneID
-                                }).then(p=> {
 
-                                    var stph = this.objs.utilityobj.standardizePhone(phone);
-                                    if (stph!=="NotOK") {
+                            this.db.EventLog.insert({
+                                EventLogID: this.objs.uuidv4(),
+                                EventID: id,
+                                OperationDate: Date.now(),
+                                Operation: "Removed Guest "+theguest.GuestName+" "+phone+" "+email
+                            });
 
-                                        this.db.Partials.insert({
-                                            FromPhone:p.PhoneNumber,
-                                            PartialID: this.objs.uuidv4(),
-                                            PhoneNumber:stph,
-                                            EmailAddress: "",
-                                            Message: "You have been uninvited from "+e.EventName+" by "+e.CreatorName+". The event may have been cancelled. Sorry :(",
-                                            Subject: null
-                                        })
-                                    }
-
-                                    return "OK";
-                                })
-                            }
+                            return this.removeAttendeeMessage(e,phone,email,esg.PhoneID,
+                                "<h3>Dear "+theguest.GuestName+",</h3><p>You have been uninvited from "+e.EventName+" by "+e.CreatorName+".  Sorry :(</p><p style='color:#a80cba'><b>Schedule Us</b></p><p>schd.us</p>",
+                                "You have been uninvited from "+e.EventName+" by "+e.CreatorName+".  Sorry :(",
+                                ).then(p=>{
+                                    return p;
+                            });
                         })
+                    
                     })
-
-                })
-              
+                })   
             }
         })
+    }
+
+    async removeAttendeeMessage(e,phone,email,phoneid,emsg,pmsg) {
+        if (phone===null || phone.length===0) { 
+            return await this.db.Partials.insert({
+                FromPhone:null,
+                PartialID: this.objs.uuidv4(),
+                PhoneNumber:"",
+                EmailAddress: email,
+                Message: emsg,
+                Subject: "Uninvited From "+e.EventName
+            }).then(p=>{
+                return "OK";
+            })
+        }
+        else {
+            return await this.db.PhoneNumbers.findOne({
+                PhoneID: phoneid
+            }).then(p=> {
+
+                var stph = this.objs.utilityobj.standardizePhone(phone);
+                if (stph!=="NotOK") {
+
+                    this.db.Partials.insert({
+                        FromPhone:p.PhoneNumber,
+                        PartialID: this.objs.uuidv4(),
+                        PhoneNumber:stph,
+                        EmailAddress: "",
+                        Message: pmsg,
+                        Subject: null
+                    })
+                }
+
+                return "OK";
+            })
+        }
     }
 
     async reportComment(eventcommentid) {

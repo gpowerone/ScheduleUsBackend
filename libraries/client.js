@@ -180,38 +180,46 @@ class client {
             }).then(g=>{
                 for(var cn=0; cn<clients.length; cn++) {
                     
-                    var tclient=clients[cn];
-
-                    var ph=this.objs.utilityobj.standardizePhone(tclient.PhoneNumber);
-                    if (ph!=="NotOK") {
-
-                        this.db.Clients.find({
-                            or:[
-                                {PhoneNumber: ph},
-                                {EmailAddress: clients[cn].EmailAddress}
-                            ]
-                        }).then(fc=>{
-                            var cl=null;
-                            if (fc!==null && fc.length>0) {
-                                cl=fc[0].ClientID;
-                            }
-
-                            this.db.ClientGroupClients.insert({
-                                ClientGroupClientID: this.objs.uuidv4(),
-                                ClientGroupID: g.ClientGroupID,
-                                ClientID: cl,
-                                PhoneNumber: ph,
-                                EmailAddress: tclient.EmailAddress,
-                                Name: tclient.Name
-                            });
-                
-                        })          
-                    }      
+                    this.addGroupAddClient(clients[cn], g);
+           
                 }
 
                 return "OK";
             })
         })
+    }
+
+    async addGroupAddClient(tclient, g) {
+        var ph=this.objs.utilityobj.standardizePhone(tclient.PhoneNumber);
+        var eml = tclient.EmailAddress;
+        var o=[]; 
+        if (ph==="NotOK" || ph===null) {
+            ph=null;
+            o.push({EmailAddress: tclient.EmailAddress});
+        }
+        else {
+            eml=null;
+            o.push({PhoneNumber: ph});
+        }
+
+        return await this.db.Clients.find({
+            or:o
+        }).then(fc=>{
+            var cl=null;
+            if (fc!==null && fc.length>0) {
+                cl=fc[0].ClientID;
+            }
+
+            this.db.ClientGroupClients.insert({
+                ClientGroupClientID: this.objs.uuidv4(),
+                ClientGroupID: g.ClientGroupID,
+                ClientID: cl,
+                PhoneNumber: ph,
+                EmailAddress: eml,
+                Name: tclient.Name
+            });
+
+        })          
     }
 
     async addToGoogleCalendar(name, addr, sdate, edate, desc) {
@@ -309,6 +317,7 @@ class client {
                 }
                 else {
                     conditional={EmailAddress: client.EmailAddress};
+                    ph=null;
                 }
 
                 return this.db.Clients.find({
@@ -463,9 +472,7 @@ class client {
 
                 if (cli.SubTerminationDate===null && (cli.IsPro===true || cli.IsPremium===true)) {
                      return "You must cancel your subscription before deleting your account";
-                }
-
-                this.objs.sessionobj.deleteForClient(c);
+                }        
 
                 return this.db.Events.find({
                     CreatorID: c,
@@ -473,21 +480,19 @@ class client {
                 }).then(e=>{
 
                     for(var xe=0; xe<e.length; xe++) {
-                        this.objs.eventsobj.cancelEvent(e.EventID);
+                        this.objs.eventsobj.cancelEvent(e[xe].EventID);
                     }
 
-                    var self=this;
-                    setTimeout(function() {
-                        return self.db.Events.destroy({
-                            CreatorID: c
-                        }).then(q=>{
-                            self.db.Clients.destroy({
-                                ClientID: c
-                            })  
-                        })
-                    },3500)
+                    return this.db.Clients.update({
+                        ClientID: c
+                    },{
+                        MarkForDelete: true
+                    }).then(p=>{
 
-                    return "OK";
+                        this.objs.sessionobj.deleteForClient(c);
+
+                        return "OK";
+                    })
 
                 })    
             })
@@ -829,57 +834,62 @@ class client {
             AccountType: 0
         }).then(r=> {  
             if (r!==null) {
-                if (r.FailedAttempts<6) {
-                    var self=this;
-      
-                    if (r.Enabled) {
-                        return self.objs.bcrypt.compare(passwd,r.Password).then(function(res) {
-                        
-                            if (res) {
+                if (r.MarkForDelete!==true) {
+                    if (r.FailedAttempts<6) {
+                        var self=this;
+        
+                        if (r.Enabled) {
+                            return self.objs.bcrypt.compare(passwd,r.Password).then(function(res) {
+                            
+                                if (res) {
 
-                                if (r.Verification!==null) {
-                                    return r.ClientID;
-                                }
+                                    if (r.Verification!==null) {
+                                        return r.ClientID;
+                                    }
 
-                                r.FailedAttempts=0;
-                                self.db.Clients.update({
-                                    ClientID: r.ClientID
-                                }, {
-                                    FailedAttempts: r.FailedAttempts
-                                });
-
-                                if (clientid===null) {
-                                    return self.objs.sessionobj.deleteForClient(r.ClientID).then(dc=> {
-                                        return self.objs.sessionobj.create(r.ClientID).then(s=> {
-                                            s.UserName=r.FirstName+" "+r.LastName;
-                                            return s;
-                                        });
+                                    r.FailedAttempts=0;
+                                    self.db.Clients.update({
+                                        ClientID: r.ClientID
+                                    }, {
+                                        FailedAttempts: r.FailedAttempts
                                     });
+
+                                    if (clientid===null) {
+                                        return self.objs.sessionobj.deleteForClient(r.ClientID).then(dc=> {
+                                            return self.objs.sessionobj.create(r.ClientID).then(s=> {
+                                                s.UserName=r.FirstName+" "+r.LastName;
+                                                return s;
+                                            });
+                                        });
+                                    }
+                                    else {
+                                        return "OK"
+                                    }
                                 }
                                 else {
-                                    return "OK"
+                                    r.FailedAttempts++;
+                                    self.db.Clients.update({
+                                        ClientID: r.ClientID
+                                    }, {
+                                        FailedAttempts: r.FailedAttempts
+                                    });
+
+                                    return "Invalid Credentials";
                                 }
-                            }
-                            else {
-                                r.FailedAttempts++;
-                                self.db.Clients.update({
-                                    ClientID: r.ClientID
-                                }, {
-                                    FailedAttempts: r.FailedAttempts
-                                });
 
-                                return "Invalid Credentials";
-                            }
-
-                        });
-                   
+                            });
+                    
+                        }
+                        else {
+                            return "This account has been disabled by the administrator";
+                        }
                     }
                     else {
-                        return "This account has been disabled by the administrator";
+                        return "There have been too many failed login attempts, please reset your password";
                     }
                 }
                 else {
-                    return "There have been too many failed login attempts, please reset your password";
+                    return "Invalid Credentials";
                 }
             }
             else {
@@ -1196,7 +1206,7 @@ class client {
                                 // Send verification message
                                 this.objs.messageobj.sendMessage(phone, "Welcome to Schedule Us! Click the link to verify your account: https://"+this.objs.envURL+"/verify?c="+r.ClientID+"&v="+r.Verification);
 
-                                return "OK";
+                                return r.ClientID;
                             })
                         });
                     }
