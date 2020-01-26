@@ -35,7 +35,13 @@ class Session {
     }
 
     async verify() {
-        if (this.sessionID===null || this.sessionID.length!==36 || this.clientID===null || this.clientID.length!==36 || this.sessionLong===null) {
+
+        try {
+            if (this.sessionID===null || this.sessionID.length!==36 || this.clientID===null || this.clientID.length!==36 || this.sessionLong===null) {
+                return null;
+            }
+        }
+        catch(e) {
             return null;
         }
 

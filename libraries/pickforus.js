@@ -10,21 +10,23 @@ class pickforus {
 
         for (var z=0; z<calendarDateTimes.length; z++) {
             for (var q=0; q<calendarDateTimes[z].length; q++) {
-                calendarDates.push([new Date(calendarDateTimes[z][q][0]), new Date(calendarDateTimes[z][q][1])])
+                calendarDates.push([Date.parse(calendarDateTimes[z][q][0]), Date.parse(calendarDateTimes[z][q][1])])
             }
         }
+
+        console.log(calendarDates);
 
         return calendarDates;
     }
 
     // Build date times for day segments
-    buildDateTimeSegments(day, tarr, startHour, finishHour) {
+    buildDateTimeSegments(day, tarr, startHour, finishHour, params) {
         var hasResult=false;
 
         if (startHour===-1) {
             for(var hour=21; hour<=23; hour++) {
                 for(var minute=0; minute<=45; minute+=15) {
-                    if (this.todayCheck(day,hour,minute) && this.calendarize(day,hour,minute)) {
+                    if (this.validCheck(day,hour,minute,params) && this.calendarize(day,hour,minute)) {
                         tarr.push([hour,minute]);
                         hasResult=true;
                     }
@@ -32,7 +34,7 @@ class pickforus {
             }
             for(var hour=0; hour<=6; hour++) {
                 for(var minute=0; minute<=45; minute+=15) {
-                    if (this.todayCheck(day,hour,minute) && this.calendarize(day,hour,minute)) {
+                    if (this.validCheck(day,hour,minute,params) && this.calendarize(day,hour,minute)) {
                         tarr.push([hour,minute]);
                         hasResult=true;
                     }
@@ -43,7 +45,7 @@ class pickforus {
 
             for(var hour=startHour; hour<=finishHour; hour++) {
                 for(var minute=0; minute<=45; minute+=15) {
-                    if (this.todayCheck(day,hour,minute) && this.calendarize(day,hour,minute)) {
+                    if (this.validCheck(day,hour,minute,params) && this.calendarize(day,hour,minute)) {
                         tarr.push([hour,minute]);
                         hasResult=true;
                     }
@@ -64,20 +66,19 @@ class pickforus {
 
         try {
             if (chosenDate.d>0) { 
-                var tomorrow = new Date();
-                tomorrow.setHours(24,0,0,0);
-                uTime+=(tomorrow.getTime()-uTime-this.offset)+ ((chosenDate.d-1)*86400000) +(chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
+                var today = new Date();
+                today.setHours(0,0,0,0);
+                uTime=(uTime-(uTime-today.getTime()))+ ((chosenDate.d)*86400000) +(chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
             }
             else {
                 var thour = (this.userTime.getUTCHours()*3600000) + (this.userTime.getUTCMinutes()*60000);
                 var chour = (chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
-                uTime+=(chour-thour);
+                uTime=(uTime-(uTime-today.getTime()))+(chour-thour);
             }
         }
         catch(e) {
             return null;
         }
-
         
         var schdate = new Date(uTime);
 
@@ -93,14 +94,14 @@ class pickforus {
         this.dayChart = [];
 
         for(var di=thisDay; di<=6; di++) {
-            if (this.dayChart.length<this.days.length) {
+            if (this.dayChart.length<=this.days.length) {
                 this.dayChart.push(di);
             }
         }
 
         for(var dw=0; dw<12; dw++) {
             for(var xi=0; xi<=6; xi++) {
-                if (this.dayChart.length<this.days.length) {
+                if (this.dayChart.length<=this.days.length) {
                     this.dayChart.push(xi);
                 }
             }
@@ -162,11 +163,11 @@ class pickforus {
             dy="0"+dy;
         }
 
-        var d = new Date(od.getFullYear()+"-"+mth+"-"+dy+"T00:00:00");
-        var ts = d.getTime()+(day*86400000)+(hour*3600000)+(minute*60000);
+        var d = new Date(od.getFullYear()+"-"+mth+"-"+dy+"T00:00:00Z");
+        var ts = d.getTime()+(day*86400000)+(hour*3600000)+(minute*60000)+this.offset;
 
         for(var ci=0; ci<this.calendars.length; ci++) {
-            if (this.calendars[ci][1].getTime()>ts && ts>=this.calendars[ci][0].getTime()) {
+            if (ts<this.calendars[ci][1] && ts>=this.calendars[ci][0]) {
                 return false;
             }
         }
@@ -194,28 +195,28 @@ class pickforus {
             // Hour rotation
             // Consider morning times
             if (params.Mornings===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,7,11)) {
+                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,7,11,params)) {
                     hasTime=true;
                 }
             }
 
             // Consider afternoon times
             if (params.Afternoons===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,12,16)) {
+                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,12,16,params)) {
                     hasTime=true;
                 }               
             }
 
             // Consider evening times
             if (params.Evenings===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,17,20)) {
+                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,17,20,params)) {
                     hasTime=true;
                 }
             }
 
             // Consider late night times
             if (params.LateNight===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,evlength,this.days[day].t,-1,-1)) {
+                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,-1,-1,params)) {
                     hasTime=true;
                 }            
             }   
@@ -311,9 +312,49 @@ class pickforus {
         })
     }
 
+    failPassedCalendar(day,hour,minute,passedCalendars)
+    {
+        for(var x=0; x<passedCalendars.length; x++) {
+            var passedCalendar=passedCalendars[x];
+            if (passedCalendar.startDay===passedCalendar.endDay) {
+                if (day===passedCalendar.startDay && hour>=passedCalendar.startHour && hour<=passedCalendar.endHour) {
+                    if (passedCalendar.startHour===hour && minute<passedCalendar.startMinute) {                      
+                        return false;                     
+                    }
+                    else if (passedCalendar.endHour===hour && minute>=passedCalendar.endMinute) {
+                        return false;
+                    }
+                    else {
+                        return true;
+                    }
+                    
+                }
+            }
+            else {
+                if (day===passedCalendar.startDay) {
+                    if (hour>=passedCalendar.startHour) {
+                        return true;
+                    }
+                    else if (hour===passedCalendar.startHour && minute>=passedCalendar.startMinute) {
+                        return true;
+                    }
+                }
+                else {
+                    if (hour<passedCalendar.endHour) {
+                        return true;
+                    }
+                    else if (hour===passedCalendar.endHour && minute<=passedCalendar.endMinute) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
     findFinalDate(usePreferred) {
         var choices=[];
-        var betterchoices=[]
         var possibleTimes=this.days;
         if (usePreferred) {
             possibleTimes=this.preferredtimes;
@@ -324,33 +365,20 @@ class pickforus {
             for(var time=0; time<possibleTimes[day].t.length; time++) {
                 if (possibleTimes[day].t[time][1]===0) {
                     choices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
-                    if (possibleTimes[day].t[time][0]>10 && possibleTimes[day].t[time][0]<=19) {
-                        betterchoices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
-                    }
+               
                 }
             }
         }
 
-        if (betterchoices.length>0) {
-            var n=Math.floor(Math.random() * Math.floor(betterchoices.length-1));
-            return betterchoices[n];
-        }
 
         for(var day=0; day<possibleTimes.length; day++) {
             for(var time=0; time<possibleTimes[day].t.length; time++) {
                 if (possibleTimes[day].t[time][1]===30) {
-                    choices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]});
-                    if (possibleTimes[day].t[time][0]>10 && possibleTimes[day].t[time][0]<=19) {
-                        betterchoices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
-                    }
+                    choices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]});            
                 }
             }
         }
-
-        if (betterchoices.length>0) {
-            var n=Math.floor(Math.random() * Math.floor(betterchoices.length-1));
-            return betterchoices[n];
-        }
+     
         if (choices.length>0) {
             var n=Math.floor(Math.random() * Math.floor(choices.length-1));
             return choices[n];
@@ -360,18 +388,12 @@ class pickforus {
         for(var day=0; day<possibleTimes.length; day++) {
             for(var time=0; time<possibleTimes[day].t.length; time++) {
                 if (possibleTimes[day].t[time][1]===15) {
-                    choices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
-                    if (possibleTimes[day].t[time][0]>10 && possibleTimes[day].t[time][0]<=19) {
-                        betterchoices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})
-                    }
+                    choices.push({d:possibleTimes[day].d, t:possibleTimes[day].t[time]})    
                 }
             }
         }
 
-        if (betterchoices.length>0) {
-            var n=Math.floor(Math.random() * Math.floor(betterchoices.length-1));
-            return betterchoices[n];
-        }
+
         if (choices.length>0) {
             var n=Math.floor(Math.random() * Math.floor(choices.length-1));
             return choices[n];
@@ -380,6 +402,7 @@ class pickforus {
         return null;
 
     }
+
 
     // performs google calendar lookups
     getGoogleCalendar(refreshToken,clientID) {
@@ -391,7 +414,7 @@ class pickforus {
         const oauth2Client = new this.objs.google.auth.OAuth2(
             "801199894294-iei4roo6p67hitq9sc2tat5ft24qfakt.apps.googleusercontent.com", 
             "WOihpgSDdZkA81FS8mF_RxmS", 
-            "https://stage.schd.us/googcalendar" 
+            "https://schd.us/googcalendar" 
         );
         
         oauth2Client.setCredentials({
@@ -643,7 +666,14 @@ class pickforus {
         }
     }
 
-    todayCheck(day,hour,minute) {
+    validCheck(day,hour,minute,params) {
+        if (typeof(params.passedCalendar)!=="undefined") {
+            console.log(params.passedCalendar);
+            if (this.failPassedCalendar(day,hour,minute,params.passedCalendar)) {
+                return false;
+            }
+        }
+
         if (day>0) {
             return true;
         }

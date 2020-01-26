@@ -238,7 +238,7 @@ class client {
                         const oauth2Client = new this.objs.google.auth.OAuth2(
                             "801199894294-iei4roo6p67hitq9sc2tat5ft24qfakt.apps.googleusercontent.com", 
                             "WOihpgSDdZkA81FS8mF_RxmS", 
-                            "https://stage.schd.us/googcalendar" 
+                            "https://schd.us/googcalendar" 
                         );
                         
                         oauth2Client.setCredentials({
@@ -502,8 +502,8 @@ class client {
     doCheckout(customerID, planId, res, stripe) {
 
         var amt=1197;
-        if (planId==="plan_G9HmWLmLGbPe6m") {
-            amt=5997;
+        if (planId==="plan_GSkenZwDUSheRL") {
+            amt=2997;
         }
 
         stripe.checkout.sessions.create({
@@ -569,46 +569,54 @@ class client {
                 return "Invalid Email Address";
             }
     
-            if (gphone!==null && gphone.length>0 && this.objs.utilityobj.verifyPhone(gphone)!=="OK") {
-                return "Invalid Phone Number";
-            }
+            var ph=null;
+
+            if (gphone!==null) {
+                if (gphone.length>0 && this.objs.utilityobj.verifyPhone(gphone)!=="OK") {
+                    return "Invalid Phone Number";
+                }
+                else {
+                    ph = this.objs.utilityobj.standardizePhone(gphone);
+                    if (ph==="NotOK") {
+                        return "Invalid Phone Number";
+                    }
+                }
+             }
     
             if ((gemail===null||gemail.length===0) && (gphone===null||gphone.length===0)) {
                 return "You must have a phone number or email address";
             }
 
-            var ph = this.objs.utilityobj.standardizePhone(gphone);
-            if (ph!=="NotOK") {
-
-                return this.db.ClientGroupClients.findOne({
-                    ClientGroupClientID: cgid
-                }).then(cgi=>{
-                    if (cgi!==null) {
-                        return this.db.ClientGroups.findOne({
-                            ClientGroupID: cgi.ClientGroupID,
-                            ClientID: c
-                        }).then(cg=>{
-                            if (cg!==null) {
-                                return this.db.ClientGroupClients.update({
-                                    ClientGroupClientID: cgid
-                                },{
-                                    PhoneNumber: ph,
-                                    EmailAddress: gemail,
-                                    Name: gname
-                                }).then(r=>{
-                                    return "OK";
-                                })
-                            }
-                            else {
-                                return "Invalid Operation";
-                            }
-                        })
-                    }
-                    else {
-                        return "Invalid Operation";
-                    }
-                })
-            }
+           
+            return this.db.ClientGroupClients.findOne({
+                ClientGroupClientID: cgid
+            }).then(cgi=>{
+                if (cgi!==null) {
+                    return this.db.ClientGroups.findOne({
+                        ClientGroupID: cgi.ClientGroupID,
+                        ClientID: c
+                    }).then(cg=>{
+                        if (cg!==null) {
+                            return this.db.ClientGroupClients.update({
+                                ClientGroupClientID: cgid
+                            },{
+                                PhoneNumber: ph,
+                                EmailAddress: gemail,
+                                Name: gname
+                            }).then(r=>{
+                                return "OK";
+                            })
+                        }
+                        else {
+                            return "Invalid Operation";
+                        }
+                    })
+                }
+                else {
+                    return "Invalid Operation";
+                }
+            })
+            
         });
     }
 
@@ -670,7 +678,7 @@ class client {
             EmailAddress: EmailAddress
         }).then(r=>{
             if (r===null) {
-                this.db.Clients.findOne({
+                return this.db.Clients.findOne({
                     EmailAddress: EmailAddress
                 }).then(p=>{
                     if (p===null) {
@@ -707,6 +715,10 @@ class client {
                         return false;
                     }
 
+                    if (FirstName.length===0 || LastName.length===0) {
+                        return false;
+                    }
+
                     if (FirstName.length>64 || LastName.length>64) {
                         return false;
                     }
@@ -727,6 +739,20 @@ class client {
           
         })
         
+    }
+
+    async getCalendarIntegrationStatus() {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c===null) {
+                return [];
+            }
+
+            return this.db.ClientCalendar.find({
+                ClientID: c
+            }).then(cc=>{
+                return cc;
+            })
+        });
     }
 
     async getClientByEmail(email) {
@@ -1145,8 +1171,8 @@ class client {
                         return this.db.Clients.update({
                             ClientID: c.ClientID
                         },{
-                            FirstName: payload.given_name,
-                            LastName: payload.family_name
+                            FirstName: payload.given_name===null?"":payload.given_name,
+                            LastName: payload.family_name===null?"":payload.family_name
                         }).then(q=>{
 
                             return this.objs.sessionobj.deleteForClient(c.ClientID).then(dc=> {
@@ -1187,8 +1213,8 @@ class client {
                                 Enabled: true,
                                 PhoneNumber: phone,
                                 EmailAddress: email,
-                                FirstName: payload.given_name,
-                                LastName: payload.family_name,
+                                FirstName: payload.given_name===null?"":payload.given_name,
+                                LastName: payload.family_name===null?"":payload.family_name,
                                 IsPremium: false,
                                 SecQuestion: 0,
                                 SecAnswer: "",

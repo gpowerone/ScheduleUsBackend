@@ -109,15 +109,9 @@ massive({
   app.use(sessionHook);
   app.use(function(req, res, next) {
     var host = req.get('host');
-    if (host==="localhost" || host==="api.schd.us") {
-        if (host==="localhost") {
-            host+=":8000";
-        }
-        if (host==="api.schd.us") {
-            host="stage.schd.us"
-        }
+    if (host==="localhost" || host==="api.schd.us") { 
 
-        res.header('Access-Control-Allow-Origin', "https://"+host)
+        res.header('Access-Control-Allow-Origin', "*")
         res.header('Access-Control-Allow-Credentials', true)
         res.header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept')
@@ -193,7 +187,7 @@ massive({
   })
 
   app.post('/addavatar', function(req, res) {
-     try {  
+     try { 
         objs.clientobj.addAvatar(Buffer.from(req.body.Image, 'base64')).then(r=>{
             res.send({ status: 200, message:"OK"});
         });
@@ -300,7 +294,7 @@ app.post('/addguest', function(req, res) {
                   
                   for(var eg=0; eg<e.Guests.length; eg++) {
                     
-                    if ((guestobj.gphone!==null && guestobj.gphone.length>0 && e.Guests[eg].PhoneNumber===guestobj.gphone) || 
+                    if ((guestobj.gphone!==null && guestobj.gphone.length>0 && e.Guests[eg].PhoneNumber===objs.utilityobj.standardizePhone(guestobj.gphone)) || 
                         (guestobj.gemail!==null && guestobj.gemail.length>0 && e.Guests[eg].EmailAddress===guestobj.gemail)) {
                        res.send({ status: 500, message:"This person has already been added to the event" });
                        return;
@@ -315,9 +309,7 @@ app.post('/addguest', function(req, res) {
                   objs.eventsobj.addGuest(req.body.EventID, guestobj, false, e.CreatorID===c?null:c).then(r=> {
                       if (r!==null) {
                         objs.eventsobj.addScheduledGuest(e.Schedules[0].EventScheduleID, r.EventGuestID, e.CreatorID===c, e, r).then(egs=> {
-                            if (e.NotifyWhenGuestsAccept===true) {
-                                objs.messageobj.sendMessage(e.CreatorPhone,"New attendee "+guestobj.gname+" RSVPed to your event "+e.EventName);
-                            }
+                            
                             res.send({ status: 200, message:"OK" });
                         })
                       }        
@@ -548,10 +540,10 @@ app.post('/changenumber', function(req, res) {
                   }).then(c=>{
                       var isPro=false;
                       var isPremium=false;
-                      if (subscription.plan.id==="plan_G9Hls9FqgtFjT7") {
+                      if (subscription.plan.id==="plan_GSkdU2M4uopeO2") {
                             isPremium=true;
                       }
-                      if (subscription.plan.id==="plan_G9HmWLmLGbPe6m") {
+                      if (subscription.plan.id==="plan_GSkenZwDUSheRL") {
                             isPro=true;
                       }
                       db.Clients.update({
@@ -860,6 +852,17 @@ app.post('/changenumber', function(req, res) {
      catch(e) {
         res.send({ status: 500, message:"An unexpected error occurred"});
      }
+  })
+
+  app.post('/getcalendarintegrationstatus', function(req,res) {
+      try {
+         objs.clientobj.getCalendarIntegrationStatus().then(r=>{
+             res.send({ status: 200, message:r})
+         })
+      }
+      catch(e) {
+         res.send({ status: 500, message:"An unexpected error occurred"});
+      }
   })
 
   app.post('/getclient', function (req, res) {
@@ -1410,8 +1413,8 @@ app.post('/changenumber', function(req, res) {
                                   subscription_id: sub.id,
                                 },
                               },
-                              success_url: 'https://stage.schd.us/myaccount?upd=1',
-                              cancel_url: 'https://stage.schd.us/myaccount?upd=2',
+                              success_url: 'https://schd.us/myaccount?upd=1',
+                              cancel_url: 'https://schd.us/myaccount?upd=2',
                           }).then(session=>{
                               res.send({
                                 status: 200,

@@ -25,7 +25,7 @@ class utilities {
 
     getDateFromTimestamp(t) {
         var d = new Date(parseInt(t));
-        return d.getMonth()+"/"+d.getDate()+"/"+d.getFullYear();
+        return (d.getMonth()+1)+"/"+d.getDate()+"/"+d.getFullYear();
     }
 
     getTimeFromTimestamp(t) {
