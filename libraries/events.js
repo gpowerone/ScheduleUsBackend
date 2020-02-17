@@ -149,6 +149,11 @@ class events {
 
     async addGuest(eventID, guest, isOrg, clientID) {
 
+        guest.gname = this.objs.utilityobj.removeEmojis(guest.gname.trim());
+        if (guest.gname.length===0) {
+            return new Promise(function (resolve, reject) { resolve(null); });
+        }
+
         if (guest.gemail!==null && guest.gemail.length>0 && this.objs.utilityobj.verifyEmail(guest.gemail)!=="OK") {
             return new Promise(function (resolve, reject) { resolve(null); });
         }
@@ -281,7 +286,7 @@ class events {
                         if (egobj.EmailAddress===null || egobj.EmailAddress.length===0) {
                             var msg= eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
                             esobj.Location+" "+addr+" on "+
-                            this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+". More information here: https://schd.us/event?e="+eventobj.Hash+"&g="+esgg.EventScheduleGuestID+". To opt out of messages from Schedule Us reply with OPTOUT."
+                            this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+". Reply with Y to say yes, N to say no, or for more options go to https://schd.us/event?e="+eventobj.Hash+"&g="+esgg.EventScheduleGuestID+"."
     
     
                             this.db.Partials.insert({
@@ -297,7 +302,7 @@ class events {
                             var msg="<h3> Dear "+egobj.GuestName+",</h3>"+
                             "<p>"+eventobj.CreatorName+" has invited you ("+egobj.GuestName+") to attend "+eventobj.EventName+" located at "+
                             esobj.Location+" "+addr+" on "+
-                            this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+"</p><p>More information here: <a href='https://schd.us/event?e="+eventobj.Hash+"&g="+esgg.EventScheduleGuestID+"'>https://schd.us/event?e="+eventobj.Hash+"</a></p><p>To opt out of messages from Schedule Us <a href='https://schd.us/optout'>click here</a>.</p>";
+                            this.objs.utilityobj.getDateFromTimestamp(eventobj.EventDate)+" at "+this.objs.utilityobj.getTimeFromTimestamp(eventobj.EventDate)+"</p><p>More information here: <a href='https://schd.us/event?e="+eventobj.Hash+"&g="+esgg.EventScheduleGuestID+"'>https://schd.us/event?e="+eventobj.Hash+"</a></p><p style='font-weight:bold;color:#a80cba'>Schedule Us</p><p style='font-size:11px;'>You received this email because someone you knew sent you an invitation. This email is not intended to promote or to market any product, good, or service.</p>";
     
                             this.db.Partials.insert({
                                 FromPhone: null,
@@ -907,13 +912,28 @@ class events {
                     CreatorID: c,
                     or: [{ActionReq: 2},
                          {ActionReq: 1}]
+                },{
+                    columns: ["EventID","EventDate","EventName","Hash"],
+                    order: [{field: "EventDate", direction: "asc"}]                   
                 }).then(hosting=> {
   
-                    var fc = {
-                        PhoneNumber: cli.PhoneNumber
-                    };
+           
+                    var fc = {or:[]};
+
+                    if (cli.PhoneNumber!==null) {
+                        fc.or.push({
+                            PhoneNumber: cli.PhoneNumber
+                        });
+                    }
+                    
                     if (cli.EmailAddress!==null) {
-                        fc.EmailAddress= cli.EmailAddress;    
+                        fc.or.push({
+                            EmailAddress: cli.EmailAddress
+                        });   
+                    }
+                    
+                    if (fc.or.length===0) {
+                        return null;
                     }
 
                     var host= [];
@@ -928,7 +948,13 @@ class events {
                         }
                     }
 
+                    if (archived.length>0) {
+                        archived.sort((a, b) => (a.EventDate < b.EventDate) ? 1 : -1)
+                    }
+
+
                     return this.db.EventGuests.find(fc).then(particguest=> {
+
 
                         if (particguest!==null && particguest.length>0)
                         {
@@ -943,11 +969,16 @@ class events {
                                     and:[{or: vor}, 
                                          {or: [{ActionReq: 2},
                                          {ActionReq: 1}]} 
-                                    ]}).then(participating=> {
+                                    ]},{
+                                        columns: ["EventID","EventDate","EventName","Hash"],
+                                        order: [{field: "EventDate", direction: "asc"}]
+                                    }).then(participating=> {
                             
                                 var part =[];
                                
+
                                 for(var n=0; n<participating.length; n++) {
+
                                     if (participating[n].EventDate>new Date().getTime()-(1000*60*60*8)) {
                                         part.push(participating[n]);
                                     }
@@ -1244,7 +1275,7 @@ class events {
         })
     }
 
-    async rescheduleEvent(eventid,startdate,enddate,location,address,city,state,postalcode,flow) {
+    async rescheduleEvent(eventid,startdate,enddate,location,address,city,state,postalcode,flow,egid) {
 
         return await this.db.EventSchedules.findOne({
             EventID: eventid,
@@ -1304,11 +1335,17 @@ class events {
                         return this.db.EventScheduleGuests.find({
                             EventScheduleID: es.EventScheduleID
                         }).then(esg=>{
-                            for(var x=0; x<esg.length; x++) {
+                         
+                            for(var x=0; x<esg.length; x++) {       
+                                var accpt=null;        
+                                if (flow===-1 && egid===esg[x].EventGuestID) {
+                                    accpt=true;
+                                }
+                                
                                 this.db.EventScheduleGuests.insert({
                                     EventScheduleGuestID: this.objs.uuidv4(),
                                     EventScheduleID: e.EventScheduleID,
-                                    Acceptance: null,
+                                    Acceptance: accpt,
                                     EventGuestID: esg[x].EventGuestID,
                                     PhoneID: esg[x].PhoneID
                                 })
@@ -1392,7 +1429,7 @@ class events {
             if (params.WillAttend===true) {
 
                 this.addGuest(eventid, {
-                    gname: params.YourName,
+                    gname: this.objs.utilityobj.removeEmojis(params.YourName.trim()),
                     gemail: null,
                     gphone: phone,
                     greq: true,                    
@@ -1487,7 +1524,7 @@ class events {
                             EventID: eventid
                         }).then(esttwo=>{
 
-                            return this.rescheduleEvent(eventid,null,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1).then(rse=> {
+                            return this.rescheduleEvent(eventid,null,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1,null).then(rse=> {
                                 return "OK"
                             })
                         });
@@ -1573,7 +1610,7 @@ class events {
                                 EventID: eventid
                             }).then(esttwo=>{
 
-                                return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,null,2).then(rse=> {
+                                return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,null,2,null).then(rse=> {
                                     return "OK"
                                 })
 
@@ -1678,18 +1715,18 @@ class events {
                 return "Non-premium accounts are allowed up to 3 events per month";
             }
    
-            if (req.body.Guests.length>50 && cli.IsPro!==true && cli.IsPremium===true) {
-                return "Non-pro accounts are allowed up to 50 attendees";
+            if (req.body.Guests.length>150 && cli.IsPro!==true && cli.IsPremium===true) {
+                return "Non-pro accounts are allowed up to 150 attendees";
             } 
-            if (req.body.Guests.length>15 && cli.IsPro!==true && cli.IsPremium!==true) {
-                return "Non-premium accounts are allowed up to 15 attendees";
+            if (req.body.Guests.length>50 && cli.IsPro!==true && cli.IsPremium!==true) {
+                return "Non-premium accounts are allowed up to 50 attendees";
             }
 
-            if (req.body.GuestLimitTotal>50 && cli.IsPro!==true && cli.IsPremium===true) {
-                return "Non-pro accounts are allowed up to 50 attendees";
+            if (req.body.GuestLimitTotal>150 && cli.IsPro!==true && cli.IsPremium===true) {
+                return "Non-pro accounts are allowed up to 150 attendees";
             } 
-            if (req.body.GuestLimitTotal>15 && cli.IsPro!==true && cli.IsPremium!==true) {
-                return "Non-premium accounts are allowed up to 15 attendees";
+            if (req.body.GuestLimitTotal>50 && cli.IsPro!==true && cli.IsPremium!==true) {
+                return "Non-premium accounts are allowed up to 50 attendees";
             }
 
             if (req.body.Guests.length>req.body.GuestLimitTotal) {

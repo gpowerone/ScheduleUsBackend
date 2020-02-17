@@ -360,7 +360,7 @@ class client {
                 return this.objs.clientobj.getClientByPhone(sPhone).then(rvp=> {
                     if (rvp===null) {
 
-                        return this.login(null,passwd,null,c).then(lr=> {
+                        return this.login(null,passwd,c).then(lr=> {
                             if (cli.AccountType>0 || lr==="OK") {
                  
                                 var hsh=this.objs.utilityobj.createHash(64);
@@ -406,7 +406,7 @@ class client {
                 return "Invalid Credentials";
             }
 
-            return this.login(null,passwd,null,c).then(cp => {
+            return this.login(null,passwd,c).then(cp => {
                 if (cp==="OK") {
                     this.db.Clients.update({
                         ClientID: c
@@ -833,7 +833,23 @@ class client {
         })
     }
 
-    async login(phone,passwd,email,clientid) {
+    async getPFUSCalendars(users) {
+        var or=[];
+        for(var x=0; x<users.length; x++) {
+            or.push({"ClientID": users[x]})
+        }
+
+        var r=[];
+
+        return await this.db.ClientCalendar.find({
+            or: or
+        }).then(ccs=>{
+
+            return r;
+        })
+    }
+
+    async login(phone,passwd,clientid) {
 
         var conditional=[];
         if (clientid!=null) {
@@ -844,11 +860,6 @@ class client {
         else if (phone!==null) {
             conditional.push({
                 "PhoneNumber": phone
-            })
-        }
-        else if (email!==null) {
-            conditional.push({
-                "EmailAddress": email.toLowerCase()
             })
         }
         else {

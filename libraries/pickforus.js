@@ -14,8 +14,6 @@ class pickforus {
             }
         }
 
-        console.log(calendarDates);
-
         return calendarDates;
     }
 
@@ -94,14 +92,14 @@ class pickforus {
         this.dayChart = [];
 
         for(var di=thisDay; di<=6; di++) {
-            if (this.dayChart.length<=this.days.length) {
+            if (this.dayChart.length<100) {
                 this.dayChart.push(di);
             }
         }
 
         for(var dw=0; dw<12; dw++) {
             for(var xi=0; xi<=6; xi++) {
-                if (this.dayChart.length<=this.days.length) {
+                if (this.dayChart.length<100) {
                     this.dayChart.push(xi);
                 }
             }
@@ -152,6 +150,10 @@ class pickforus {
 
     // Returns true if there are no calendar conflicts for the given date time
     calendarize(day,hour,minute) {
+
+        if (this.calendars.length===0) {
+            return true;
+        }
 
         var od = new Date();
         var mth = od.getMonth()+1;
@@ -428,31 +430,18 @@ class pickforus {
 
         return calendar.calendarList.list({}).then(res => {
 
-            for(var c=0; c<res.data.items.length; c++) {
-                var cal = res.data.items[c];
-                if (cal.id!=='en.usa#holiday@group.v.calendar.google.com' && cal.id!=='addressbook#contacts@group.v.calendar.google.com')
-                {
-                    return calendar.events.list({
-                        'calendarId': cal.id,
-                        'timeMin': (new Date()).toISOString(),
-                        'showDeleted': false,
-                        'singleEvents': true,
-                        'orderBy': 'startTime'
-                    }).then(function(response) {
-                        var events = response.data.items;
-                        var calItems=[];
-                        for(var e=0; e<events.length; e++) {
-                            calItems.push([events[e].start.dateTime, events[e].end.dateTime]);
-                        }
-                        return calItems;
-                    });
-                }
-                else {
-                    return [];
-                }
+            if (res.data.items.length>0) {
+                return this.getCalendarDataRecur(0, res.data.items,calendar,this).then(c=>{
+                    return c;
+                });
             }
-        
+            else {
+                return [];
+            }
+             
         }).catch(err=>{
+
+       
             return this.db.ClientCalendar.destroy({
                 ClientID: cliID,
                 CalendarType: 0
@@ -462,11 +451,71 @@ class pickforus {
                 })
                 
             })
-            
+        
         })
     
       
         
+    }
+
+    getCalendarDataRecur(num,callist,calendar,self) {
+        var cal = callist[num];
+        var fCal=[];
+
+        if (cal.accessRole.indexOf("owner")>-1)
+        {
+            console.log("Used");
+            console.log(cal);
+
+            return calendar.events.list({
+                'calendarId': cal.id,
+                'timeMin': (new Date()).toISOString(),
+                'showDeleted': false,
+                'singleEvents': true,
+                'orderBy': 'startTime'
+            }).then(function(response) {
+                var events = response.data.items;
+                var calItems=[];
+                for(var e=0; e<events.length; e++) {
+                    calItems.push([events[e].start.dateTime, events[e].end.dateTime]);
+                }
+
+                num++;
+                if (num===callist.length) {
+                    return new Promise(function (resolve, reject) { resolve(calItems); });
+                }
+                else {
+                   
+                    return self.getCalendarDataRecur(num,callist,calendar,self).then(items=>{
+                        for (var x=0; x<items.length; x++) {
+                            calItems.push(items[x]);                            
+                        }
+
+                        return new Promise(function (resolve, reject) { resolve(calItems); });
+                    });
+                }
+            });
+
+
+        }
+        else {
+
+            num++;
+            if (num===callist.length) {
+                return new Promise(function (resolve, reject) { resolve(fCal); });
+            }
+            else {
+                
+                var calItems=[];
+                return self.getCalendarDataRecur(num,callist,calendar,self).then(items=>{
+                    for (var x=0; x<items.length; x++) {
+                        calItems.push(items[x]);                            
+                    }
+                    return new Promise(function (resolve, reject) { resolve(calItems); });
+                });
+            }
+            
+        }
     }
 
     getCalendarRecur(calendarTokens, filledCalendars, clientIDs) {
@@ -668,7 +717,6 @@ class pickforus {
 
     validCheck(day,hour,minute,params) {
         if (typeof(params.passedCalendar)!=="undefined") {
-            console.log(params.passedCalendar);
             if (this.failPassedCalendar(day,hour,minute,params.passedCalendar)) {
                 return false;
             }
