@@ -214,6 +214,17 @@ massive({
      }
   })
 
+  app.post('/addcm', function(req, res) {
+     try {
+        objs.clientobj.addFCM(req.body.Token).then(r=>{
+             res.send({ status: 200, message:r });
+        })
+     }
+     catch(e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+     }
+  })
+
   app.post('/addcomment', function(req, res) {
      try {
         objs.eventsobj.addComment(req.body.EventID, req.body.EventGuestID, req.body.ParentID, req.body.Comment).then(r=> {
@@ -301,9 +312,11 @@ app.post('/addguest', function(req, res) {
                     }
                   }
 
-                  if (e.Guests.length+1>e.EventMaxCapacity) {
-                    res.send({ status: 500, message:"This event is at capacity and cannot accept any additional RSVPs" });
-                    return;
+                  if (e.GuestsCanBringOthers===true && e.CreatorID!==c) {
+                    if (e.Guests.length+1>e.EventMaxCapacity) {
+                      res.send({ status: 500, message:"This event is at capacity and cannot accept any additional RSVPs" });
+                      return;
+                    }
                   }
 
                   objs.eventsobj.addGuest(req.body.EventID, guestobj, false, e.CreatorID===c?null:c).then(r=> {
@@ -1151,17 +1164,8 @@ app.post('/changenumber', function(req, res) {
 
   app.post('/login', function(req, res) {
     try {
-        var phone=req.body.Phone;
-        var email=null;
-        if (phone.indexOf("@")>-1) {
-            email=phone;
-            phone=null;
-        }
-        if (phone!==null) {
-            phone=objs.utilityobj.standardizePhone(phone);
-        }
 
-        objs.clientobj.login(phone, req.body.Passwd, email, null).then(s=> {
+        objs.clientobj.login(objs.utilityobj.standardizePhone(req.body.Phone), req.body.Passwd,  null).then(s=> {
             if (s!==null) {
                 res.send({ status: typeof(s.SessionID)!=="undefined"?200:500, message:s});
             }
@@ -1217,6 +1221,17 @@ app.post('/changenumber', function(req, res) {
        res.send({ status: 500, message:"An unexpected error occurred"});
      }
   })
+
+  app.post('/pfuscalendars', function(req,res) {
+      try {
+         objs.clientobj.getPFUSCalendars(req.body.Users).then(r=>{
+             res.send({ status: 200, message:r});
+         });
+      }
+      catch (e) {
+        res.send({ status: 500, message:"An unexpected error occurred"});
+      }
+  });
 
   app.post('/rejectchanges', function(req, res) {
     objs.eventsobj.rejectChanges(req.body.EventID).then(r=>{
@@ -1336,7 +1351,7 @@ app.post('/changenumber', function(req, res) {
 
   app.post('/suggestnewtime', function(req, res) {
     try {
-       objs.eventsobj.suggestNewTime(req.body.EventID, req.body.EventGuestID, req.body.EvTime).then(r=>{
+       objs.eventsobj.suggestNewTime(req.body.EventID, req.body.EventGuestID, req.body.EvTime, req.body.TZUpdate).then(r=>{
           if (r==="OK") {
             res.send({ status: 200, message:"OK" });
           }        
@@ -1375,7 +1390,7 @@ app.post('/changenumber', function(req, res) {
                     res.send({ status: 500, message: addrr})
                 }
                 else {
-                  objs.eventsobj.rescheduleEvent(o.EventID, null, null, req.body.Location, req.body.EventStreet, req.body.EventCity, req.body.EventState, req.body.EventZip, -1);
+                  objs.eventsobj.rescheduleEvent(o.EventID, null, null, req.body.Location, req.body.EventStreet, req.body.EventCity, req.body.EventState, req.body.EventZip, -1, req.body.EGID, o.TimezoneOffset);
                   res.send({ status: 200, message:"OK"});
                 }
               }
@@ -1456,7 +1471,7 @@ app.post('/changenumber', function(req, res) {
                           return;
                         }   
                   }
-                  var sdate = new Date(req.body.EventDate).getTime()+(o.TimezoneOffset*60*1000);
+                  var sdate = new Date(req.body.EventDate).getTime()+(req.body.TZUpdate*60*1000);
                   var vdate = new Date().getTime()+(o.TimezoneOffset*60*1000);
                   var edate=null;
     
@@ -1479,7 +1494,7 @@ app.post('/changenumber', function(req, res) {
                       return "Invalid operation";
                   }
 
-                  objs.eventsobj.rescheduleEvent(o.EventID, sdate, edate, null, null, null, null, null, -1);
+                  objs.eventsobj.rescheduleEvent(o.EventID, sdate, edate, null, null, null, null, null, -1, req.body.EGID, req.body.TZUpdate);
                   res.send({ status: 200, message:"OK"});
              });
           }

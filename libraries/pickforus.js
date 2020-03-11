@@ -63,15 +63,16 @@ class pickforus {
         // If there are days, these are always added. 
 
         try {
+            var today = new Date();
+            today.setHours(0,0,0,0);
+
             if (chosenDate.d>0) { 
-                var today = new Date();
-                today.setHours(0,0,0,0);
+                
                 uTime=(uTime-(uTime-today.getTime()))+ ((chosenDate.d)*86400000) +(chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
             }
             else {
-                var thour = (this.userTime.getUTCHours()*3600000) + (this.userTime.getUTCMinutes()*60000);
                 var chour = (chosenDate.t[0]*3600000)+(chosenDate.t[1]*60000);
-                uTime=(uTime-(uTime-today.getTime()))+(chour-thour);
+                uTime=(uTime-(uTime-today.getTime()))+chour;
             }
         }
         catch(e) {
@@ -151,6 +152,8 @@ class pickforus {
     // Returns true if there are no calendar conflicts for the given date time
     calendarize(day,hour,minute) {
 
+        console.log(this.calendars);
+
         if (this.calendars.length===0) {
             return true;
         }
@@ -201,29 +204,37 @@ class pickforus {
                     hasTime=true;
                 }
             }
-
-            // Consider afternoon times
-            if (params.Afternoons===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,12,16,params)) {
-                    hasTime=true;
-                }               
-            }
-
-            // Consider evening times
-            if (params.Evenings===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,17,20,params)) {
-                    hasTime=true;
-                }
-            }
-
-            // Consider late night times
-            if (params.LateNight===true) {
-                if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,-1,-1,params)) {
-                    hasTime=true;
-                }            
-            }   
-          
         }
+
+        // Consider afternoon times for events less than 6 hours, unless we don't have a time
+        if (evlength<360||!hasTime) {
+            for(var day=0; day<this.days.length; day++) {
+                if (params.Afternoons===true) {
+                    if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,12,16,params)) {
+                        hasTime=true;
+                    }          
+                }     
+            }
+        }
+
+        // Consider evening times and late night times for events less than 4 hours long, unless we have no other time
+        if (evlength<240||!hasTime) {
+            for(var day=0; day<this.days.length; day++) {
+                if (params.Evenings===true) {
+                    if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,17,20,params)) {
+                        hasTime=true;
+                    }
+                }
+
+                // Consider late night times
+                if (params.LateNight===true) {
+                    if (this.buildDateTimeSegments(this.days[day].d,this.days[day].t,-1,-1,params)) {
+                        hasTime=true;
+                    }            
+                }   
+            }
+        }
+          
 
         return hasTime;
         
@@ -235,12 +246,14 @@ class pickforus {
             return this.objs.clientobj.getClientByID(c).then(cli=> {
 
                 if (cli===null) {
-                    return "You must be logged in to use Pick for Us";
+                    return "N";
                 }
   
-                if (cli.PFUSusage>=15) {
-                    return "You have reached the maximum number of times you may use Pick for Us today. Please try again tomorrow.";
+          
+                if (cli.PFUSusage>=300) {
+                    return "N";
                 }
+            
     
                 return this.db.Clients.update({
                     ClientID: cli.ClientID
@@ -382,7 +395,7 @@ class pickforus {
         }
      
         if (choices.length>0) {
-            var n=Math.floor(Math.random() * Math.floor(choices.length-1));
+            var n=Math.floor(Math.random() * Math.floor(choices.length));
             return choices[n];
         }
 

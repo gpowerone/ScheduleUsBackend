@@ -674,7 +674,7 @@ class events {
                                     ClientID: e.CreatorID
                                 }).then(eg=> {
                                     if (eg!==null) {
-                                        this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName+". Access here: https://"+this.objs.envURL+"/event?e="+e.Hash+"&g="+eg.EventGuestID);
+                                        this.objs.messageobj.sendMessage(e.CreatorPhone, "All attendees have replied to your invitation for "+e.EventName);
                                     }
                                     return "OK";
                                 });
@@ -1275,7 +1275,7 @@ class events {
         })
     }
 
-    async rescheduleEvent(eventid,startdate,enddate,location,address,city,state,postalcode,flow,egid) {
+    async rescheduleEvent(eventid,startdate,enddate,location,address,city,state,postalcode,flow,egid,tzupdate) {
 
         return await this.db.EventSchedules.findOne({
             EventID: eventid,
@@ -1373,7 +1373,8 @@ class events {
                                 },{
                                     EventDate: startdate,
                                     ActionReq:areq,
-                                    Reschedule:true
+                                    Reschedule:true,
+                                    TimezoneOffset: tzupdate
                                 }).then(pox=>{
                                     
                                     return "OK"
@@ -1524,7 +1525,7 @@ class events {
                             EventID: eventid
                         }).then(esttwo=>{
 
-                            return this.rescheduleEvent(eventid,null,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1,null).then(rse=> {
+                            return this.rescheduleEvent(eventid,null,null,winner.Location,winner.Address,winner.City,winner.State,winner.PostalCode,1,null,e.TimezoneOffset).then(rse=> {
                                 return "OK"
                             })
                         });
@@ -1538,7 +1539,7 @@ class events {
         });
     }
 
-    async suggestNewTime(eventid,evguestid,evtime) {
+    async suggestNewTime(eventid,evguestid,evtime,tzupdate) {
         return await this.getEventById(eventid).then(e=> {
 
             if (e.AllowReschedule!==true) {
@@ -1559,14 +1560,15 @@ class events {
                    return "Cannot enter dates in the past or less than 8 hours from now";   
                 }
 
-                var d=new Date(evtime).getTime()+(e.TimezoneOffset*60*1000);
+                var d=new Date(evtime).getTime()+(tzupdate*60*1000);
 
                 return this.db.EventSuggestedTimes.insert({
                     EventSuggestedTimeID: this.objs.uuidv4(),
                     EventID: eventid,
                     StartDate: d,
                     EventGuestID: evguestid,
-                    IterationNum: e.Schedules[0].IterationNum
+                    IterationNum: e.Schedules[0].IterationNum,
+                    TZUpdate: tzupdate
                 }).then(est=>{
 
                     allest.push(est);
@@ -1593,6 +1595,7 @@ class events {
                             if (!foundPR && pollResults[pr].Time<new Date().getTime()) {
                                 pollResults.push({
                                     Time: allest[tg].StartDate,
+                                    TZUpdate: allest[tg].TZUpdate,
                                     Count:1
                                 });
                             }
@@ -1610,7 +1613,7 @@ class events {
                                 EventID: eventid
                             }).then(esttwo=>{
 
-                                return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,null,2,null).then(rse=> {
+                                return this.rescheduleEvent(eventid,winner.Time,null,null,null,null,null,null,2,null,winner.TZUpdate).then(rse=> {
                                     return "OK"
                                 })
 

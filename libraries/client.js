@@ -163,6 +163,34 @@ class client {
         })
     }
 
+    async addFCM(token) {
+        return await this.objs.sessionobj.verify().then(c=> {
+            if (c!==null) {
+                return this.db.ClientFCMToken.findOne({
+                     ClientID: c,
+                     FirebaseToken: token
+                }).then(q=>{
+                    if (q===null) {
+                        return this.db.ClientFCMToken.insert({
+                            ClientFCMTokenID: this.objs.uuidv4(),
+                            ClientID: c,
+                            FirebaseToken: token
+                        }).then(r=>{
+                            return "OK";
+                        })
+                    }
+                    else {
+                        return "token already exists";
+                    }
+                })
+              
+            }
+            else {
+                return "Invalid Operation";
+            }
+        });
+    }
+
     async addGroup(groupname, clients) {
         return await this.objs.sessionobj.verify().then(c=> {
             if (c===null) {
@@ -834,16 +862,39 @@ class client {
     }
 
     async getPFUSCalendars(users) {
-        var or=[];
+        var sql = "SELECT * FROM \"public\".\"ClientCalendar\" INNER JOIN \"public\".\"Clients\" ON \"ClientCalendar\".\"ClientID\"=\"Clients\".\"ClientID\" WHERE";
+        var isfirst=true;
         for(var x=0; x<users.length; x++) {
-            or.push({"ClientID": users[x]})
+            if (typeof(users[x].cid)!=="undefined") {
+            
+                if (!isfirst) {
+                    sql+=" OR";
+                }
+                isfirst=false;
+                users[x].cid=users[x].cid.replace(/\W/g, '');
+                sql+=" \"Clients\".\"ClientID\"='"+users[x].cid+"'";
+            }
+            if (typeof(users[x].gid)!=="undefined" && users[x].gid!==null) {
+            
+                if (!isfirst) {
+                    sql+=" OR";
+                }
+                isfirst=false;
+                users[x].gid=users[x].gid.replace(/\W/g, '');
+                sql+=" \"Clients\".\"ClientID\"='"+users[x].gid+"'";
+            }
         }
 
         var r=[];
 
-        return await this.db.ClientCalendar.find({
-            or: or
-        }).then(ccs=>{
+
+        return await this.db.query(sql).then(ccs=>{
+
+            for (var q=0; q<ccs.length; q++) {
+                if (ccs[q].CalendarType===0) {
+                    r.push(ccs[q].FirstName+" "+ccs[q].LastName+" (All Google Calendars Owned)");
+                }
+            } 
 
             return r;
         })
